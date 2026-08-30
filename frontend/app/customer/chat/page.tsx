@@ -8,6 +8,7 @@ import { useAuth } from '@/stores/authStore'
 import { ChatWidget } from '@/components/chat/ChatWidget'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { RoleGuard } from '@/components/auth/RoleGuard'
+import { NotificationBell } from '@/components/notifications/NotificationBell'
 
 function ChatContent() {
   const router = useRouter()
@@ -52,6 +53,7 @@ function ChatContent() {
           <nav className="flex items-center gap-2">
             <Link href="/customer/chat" className="text-sm font-bold text-indigo-600 bg-indigo-50/50 px-3.5 py-1.5 rounded-xl">Support Chat</Link>
             <Link href="/customer/tickets" className="text-sm font-semibold text-slate-600 hover:text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-slate-100/50">My Tickets</Link>
+            <NotificationBell />
             <button onClick={() => void logout()} className="rounded-xl border border-rose-200/80 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 text-xs font-bold text-rose-700 flex items-center gap-1.5 cursor-pointer ml-2">Sign Out</button>
           </nav>
         </div>

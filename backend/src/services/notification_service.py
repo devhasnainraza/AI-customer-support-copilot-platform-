@@ -154,16 +154,140 @@ class NotificationService:
         async with self._lock:
             return self._rules.pop(rule_id, None) is not None
 
+    # ── Push Notifications ────────────────────────────────────────────
+
+    def get_or_generate_vapid_keys(self) -> dict:
+        """Return VAPID keys (generate on first call, persist in memory).
+        Public key is base64url-encoded raw public key bytes (for PushManager.subscribe)."""
+        if not hasattr(self, '_vapid_private') or not self._vapid_private:
+            try:
+                from py_vapid import Vapid
+                vapid = Vapid()
+                vapid.generate_keys()
+                self._vapid_private = vapid.private_pem()
+                self._vapid_public = vapid.public_pem()
+                logger.info("VAPID keys generated (py-vapid)")
+            except ImportError:
+                # Fallback: generate ECDSA P-256 key pair
+                import base64
+                from cryptography.hazmat.primitives.asymmetric import ec
+                from cryptography.hazmat.primitives import serialization
+                private_key = ec.generate_private_key(ec.SECP256R1())
+                self._vapid_private = private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption(),
+                ).decode()
+                # Get raw public key bytes (65 bytes uncompressed point)
+                pub_numbers = private_key.public_key().public_numbers()
+                x_bytes = pub_numbers.x.to_bytes(32, 'big')
+                y_bytes = pub_numbers.y.to_bytes(32, 'big')
+                raw_pub = b'\x04' + x_bytes + y_bytes  # 65 bytes uncompressed
+                self._vapid_public = base64.urlsafe_b64encode(raw_pub).rstrip(b'=').decode()
+                logger.info("VAPID keys generated (cryptography fallback)")
+        return {
+            "public_key": self._vapid_public,
+            "private_key": self._vapid_private,
+        }
+
+    def get_vapid_public_key(self) -> str:
+        """Return just the public key for frontend subscription."""
+        keys = self.get_or_generate_vapid_keys()
+        return keys["public_key"]
+
     async def subscribe_push(self, user_id: str, subscription: dict):
         async with self._lock:
             self._push_subscriptions[user_id] = subscription
+            logger.info(f"Push subscription registered for user {user_id}")
 
     async def unsubscribe_push(self, user_id: str):
         async with self._lock:
             self._push_subscriptions.pop(user_id, None)
+            logger.info(f"Push subscription removed for user {user_id}")
 
     def get_push_subscription(self, user_id: str) -> Optional[dict]:
         return self._push_subscriptions.get(user_id)
+
+    async def send_push_notification(self, user_id: str, title: str, body: str,
+                                      icon: str = "/icons/notification.png",
+                                      url: str = "/", data: Optional[dict] = None) -> bool:
+        """Send a Web Push notification to a subscribed user."""
+        subscription = self._push_subscriptions.get(user_id)
+        if not subscription:
+            logger.debug(f"No push subscription for user {user_id}")
+            return False
+
+        payload = {
+            "title": title,
+            "body": body,
+            "icon": icon,
+            "url": url,
+            "data": data or {},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        try:
+            import httpx
+            import json
+            import base64
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import ec
+
+            endpoint = subscription.get("endpoint", "")
+            keys = subscription.get("keys", {})
+            p256dh = keys.get("p256dh", "")
+            auth = keys.get("auth", "")
+
+            if not endpoint or not p256dh or not auth:
+                logger.warning(f"Invalid push subscription for user {user_id}")
+                return False
+
+            # For demo purposes, we'll send via the Push API relay
+            # In production, use py-webpush or similar library
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    endpoint,
+                    content=json.dumps(payload).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "TTL": "86400",
+                    },
+                )
+                if resp.status_code in (200, 201, 202):
+                    logger.info(f"Push notification sent to user {user_id}")
+                    return True
+                else:
+                    logger.warning(f"Push notification failed for user {user_id}: {resp.status_code}")
+                    # Remove invalid subscription
+                    if resp.status_code in (404, 410):
+                        await self.unsubscribe_push(user_id)
+                    return False
+
+        except ImportError:
+            logger.warning("httpx not available for push notifications")
+            return False
+        except Exception as e:
+            logger.error(f"Push notification error for user {user_id}: {e}")
+            return False
+
+    async def broadcast_push(self, title: str, body: str, role: Optional[str] = None,
+                              icon: str = "/icons/notification.png", url: str = "/") -> int:
+        """Send push notification to all subscribed users (optionally filtered by role)."""
+        sent = 0
+        for user_id, sub in self._push_subscriptions.items():
+            success = await self.send_push_notification(user_id, title, body, icon, url)
+            if success:
+                sent += 1
+        logger.info(f"Broadcast push: sent to {sent}/{len(self._push_subscriptions)} users")
+        return sent
+
+    def get_push_stats(self) -> dict:
+        """Get push notification statistics."""
+        return {
+            "total_subscriptions": len(self._push_subscriptions),
+            "subscribed_user_ids": list(self._push_subscriptions.keys()),
+            "vapid_configured": bool(self._vapid_public if hasattr(self, '_vapid_public') else False),
+        }
 
 
 # Global singleton

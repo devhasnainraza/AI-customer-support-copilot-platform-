@@ -118,6 +118,11 @@ app.include_router(admin_router)
 app.include_router(manager_router)
 app.include_router(notifications_router)
 
+# WhatsApp Business API routes
+from src.api.routes.whatsapp import router as whatsapp_router
+from src.api.routes.whatsapp_ws import router as whatsapp_ws_router
+app.include_router(whatsapp_router)
+app.include_router(whatsapp_ws_router)
 
 
 @app.get("/")

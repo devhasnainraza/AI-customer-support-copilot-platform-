@@ -16,7 +16,7 @@ const securityHeaders = [
       "font-src 'self' data: https://fonts.gstatic.com",
       "img-src 'self' data: blob:",
       // API + WebSocket + Supabase
-      "connect-src 'self' http://localhost:8000 ws://localhost:8000 https://*.supabase.co wss://*.supabase.co",
+      "connect-src 'self' http://localhost:8000 ws://localhost:8000 http://localhost:8001 ws://localhost:8001 http://localhost:8002 ws://localhost:8002 https://*.supabase.co wss://*.supabase.co",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

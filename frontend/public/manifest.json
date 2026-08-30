@@ -1,0 +1,21 @@
+{
+  "name": "Copilot Portal - AI Customer Support",
+  "short_name": "Copilot Portal",
+  "description": "AI-powered customer support with real-time notifications",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "/icons/notification.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/badge.png",
+      "sizes": "72x72",
+      "type": "image/png"
+    }
+  ]
+}

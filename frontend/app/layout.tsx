@@ -21,6 +21,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "AI Customer Support Copilot",
   description: "Real-time AI-powered customer support with intelligent agents and human escalation",
+  manifest: "/manifest.json",
+  themeColor: "#6366f1",
+  icons: {
+    icon: "/icons/notification.png",
+  },
 };
 
 export default function RootLayout({
