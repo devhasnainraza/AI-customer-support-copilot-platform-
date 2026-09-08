@@ -55,8 +55,12 @@ export function useChat(conversationId?: string) {
 
         case 'message':
           setIsTyping(false)
-          if (message.sender === 'human_agent' || (message as any).sender_type === 'human_agent') {
-            const agentName = (message as any).agent_name || 'Support Specialist'
+          const isHumanAgent = message.sender === 'human_agent' || (message as any).sender_type === 'human_agent'
+          if (isHumanAgent) {
+            let agentName = (message as any).agent_name || 'Support Specialist'
+            if (user?.email && agentName.toLowerCase().trim() === user.email.toLowerCase().trim()) {
+              agentName = 'Support Specialist'
+            }
             addMessage({
               id: message.message_id || (message as any).id || `agent-${Date.now()}`,
               conversation_id: conversationId || (message as any).conversation_id,
@@ -125,7 +129,10 @@ export function useChat(conversationId?: string) {
           const hMsg = message as any
           if (hMsg.handoff) {
             const h = hMsg.handoff
-            const rawAgent = h.assigned_agent || h.assigned_agent_name || h.assigned_agent_id || null
+            let rawAgent = h.assigned_agent_name || h.assigned_agent || h.assigned_agent_id || null
+            if (rawAgent && user?.email && rawAgent.toLowerCase().trim() === user.email.toLowerCase().trim()) {
+              rawAgent = 'Support Specialist'
+            }
             const displayAgent = rawAgent && (rawAgent.includes('@') || !rawAgent.includes('-')) ? rawAgent : (rawAgent ? 'Support Specialist' : null)
             setHandoff({
               active: h.active !== false && h.status !== 'resolved' && h.status !== 'cancelled',
@@ -219,12 +226,17 @@ export function useChat(conversationId?: string) {
         if (res.ok) {
           const h = await res.json()
           if (h && (h.status === 'waiting' || h.status === 'assigned' || h.status === 'in_progress')) {
+            let rawAgent = h.assigned_agent_name || h.assigned_agent || h.assigned_agent_id || null
+            if (rawAgent && user?.email && rawAgent.toLowerCase().trim() === user.email.toLowerCase().trim()) {
+              rawAgent = 'Support Specialist'
+            }
+            const displayAgent = rawAgent && (rawAgent.includes('@') || !rawAgent.includes('-')) ? rawAgent : (rawAgent ? 'Support Specialist' : null)
             setHandoff({
               active: true,
               status: h.status,
               reason: h.reason,
               priority: h.priority,
-              assigned_agent: h.assigned_agent || h.assigned_agent_id || null,
+              assigned_agent: displayAgent,
               request_id: h.id,
             })
           }
@@ -386,14 +398,6 @@ export function useChat(conversationId?: string) {
         status: 'in_progress',
         assigned_agent: agentName,
       })
-      addMessage({
-        id: `agent-join-${Date.now()}`,
-        conversation_id: conversationId,
-        sender_type: 'human_agent',
-        agent_name: agentName,
-        content: `Hello! I am ${agentName} from Tier-2 Customer Support. I have joined this live session and reviewed the context. How can I help you today?`,
-        timestamp: new Date().toISOString(),
-      })
 
       try {
         const token = await getAuthToken()
@@ -405,11 +409,11 @@ export function useChat(conversationId?: string) {
           },
           body: JSON.stringify({ agent_id: 'specialist-alex-morgan' }),
         })
-      } catch {
-        // Optimistic UI state already updated
+      } catch (err) {
+        console.error('Fast assign error:', err)
       }
     },
-    [conversationId, setHandoff, addMessage]
+    [conversationId, setHandoff]
   )
 
   return {

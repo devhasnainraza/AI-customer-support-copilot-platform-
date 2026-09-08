@@ -367,7 +367,7 @@ async def send_multi_channel_test_notification(payload: MultiChannelTestRequest)
     results = {}
 
     # 1. Dispatch Email
-    target_email = payload.to_email or settings.admin_notification_email or "developerhasnainraza@gmail.com"
+    target_email = payload.to_email or settings.admin_notification_email or "admin@example.com"
     try:
         subject, html = EmailTemplate.custom(
             to=target_email,

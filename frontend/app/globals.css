@@ -3,19 +3,60 @@
 
 :root {
   --background: #f8fafc;
-  --foreground: #090d16;
+  --foreground: #0e2a47;
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+  
+  --brand-cyan: #06B6D4;
+  --brand-navy: #1E3A8A;
+  --brand-dark: #0E2A47;
   
   --sidebar-width: 260px;
   --sidebar-collapsed-width: 72px;
 }
 
-@theme inline {
+@theme {
   --font-sans: var(--font-sans);
   --font-display: var(--font-display);
   --font-mono: var(--font-mono);
+
+  /* SVG Brand Theme: Cyan (#06B6D4) -> Deep Blue (#1E3A8A) -> Midnight Navy (#0E2A47) */
+  --color-indigo-50: #ecfeff;
+  --color-indigo-100: #cffafe;
+  --color-indigo-200: #a5f3fc;
+  --color-indigo-300: #67e8f9;
+  --color-indigo-400: #22d3ee;
+  --color-indigo-500: #06b6d4;
+  --color-indigo-600: #0891b2;
+  --color-indigo-700: #0e7490;
+  --color-indigo-800: #1e3a8a;
+  --color-indigo-900: #0e2a47;
+  --color-indigo-950: #081d33;
+
+  --color-violet-50: #f0f9ff;
+  --color-violet-100: #e0f2fe;
+  --color-violet-200: #bae6fd;
+  --color-violet-300: #7dd3fc;
+  --color-violet-400: #38bdf8;
+  --color-violet-500: #06b6d4;
+  --color-violet-600: #1e3a8a;
+  --color-violet-700: #0e2a47;
+  --color-violet-800: #081d33;
+  --color-violet-900: #040e1a;
+  --color-violet-950: #020810;
+
+  --color-cyan-50: #ecfeff;
+  --color-cyan-100: #cffafe;
+  --color-cyan-200: #a5f3fc;
+  --color-cyan-300: #67e8f9;
+  --color-cyan-400: #22d3ee;
+  --color-cyan-500: #06b6d4;
+  --color-cyan-600: #0891b2;
+  --color-cyan-700: #0e7490;
+  --color-cyan-800: #155e75;
+  --color-cyan-900: #164e63;
+  --color-cyan-950: #083344;
 }
 
 body {
@@ -28,16 +69,30 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   Brand Specific SVG Gradients & Text
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.brand-gradient-bg {
+  background: linear-gradient(135deg, #06B6D4 0%, #1E3A8A 100%);
+}
+
+.brand-gradient-text {
+  background: linear-gradient(135deg, #06B6D4 0%, #1E3A8A 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    VIP Surface & Elevation Design System
    ───────────────────────────────────────────────────────────────────────────── */
 
 /* Top-tier SaaS Card with Micro-Borders & Soft Ambient Shadow */
 .surface-vip {
   background: #ffffff;
-  border: 1px solid rgba(226, 232, 240, 0.85);
+  border: 1px solid rgba(207, 250, 254, 0.9);
   box-shadow: 
-    0 1px 3px 0 rgba(15, 23, 42, 0.03),
-    0 6px 16px -2px rgba(15, 23, 42, 0.04),
+    0 1px 3px 0 rgba(14, 42, 71, 0.03),
+    0 6px 16px -2px rgba(14, 42, 71, 0.04),
     inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
   border-radius: 1.25rem;
 }
@@ -47,49 +102,49 @@ body {
 }
 .surface-vip-interactive:hover {
   transform: translateY(-2px);
-  border-color: rgba(199, 210, 254, 0.9);
+  border-color: rgba(6, 182, 212, 0.45);
   box-shadow: 
-    0 4px 6px -1px rgba(15, 23, 42, 0.03),
-    0 16px 32px -4px rgba(99, 102, 241, 0.08),
+    0 4px 6px -1px rgba(14, 42, 71, 0.04),
+    0 16px 32px -4px rgba(6, 182, 212, 0.12),
     inset 0 1px 0 0 rgba(255, 255, 255, 1);
 }
 
 /* Frosted Glass Floating Header/Sidebar */
 .surface-glass {
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.90);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(226, 232, 240, 0.8);
+  border: 1px solid rgba(207, 250, 254, 0.8);
 }
 
 /* Inset Well Surface for Code/Tables/Lists */
 .surface-inset {
   background: #f8fafc;
   border: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: inset 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  box-shadow: inset 0 1px 2px 0 rgba(14, 42, 71, 0.04);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   VIP Buttons & Interactive Controls
+   VIP Buttons & Interactive Controls (Cyan #06B6D4 -> Navy #1E3A8A)
    ───────────────────────────────────────────────────────────────────────────── */
 
 .btn-vip-primary {
-  background: linear-gradient(180deg, #4f46e5 0%, #4338ca 100%);
+  background: linear-gradient(135deg, #06B6D4 0%, #1E3A8A 100%);
   color: #ffffff;
   font-weight: 700;
-  border: 1px solid #3730a3;
+  border: 1px solid #0e7490;
   box-shadow: 
     0 1px 2px 0 rgba(0, 0, 0, 0.08),
-    0 4px 12px 0 rgba(79, 70, 229, 0.24),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
+    0 4px 14px 0 rgba(6, 182, 212, 0.35),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.25);
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .btn-vip-primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, #4338ca 0%, #3730a3 100%);
+  background: linear-gradient(135deg, #0891B2 0%, #0E2A47 100%);
   box-shadow: 
     0 2px 4px 0 rgba(0, 0, 0, 0.12),
-    0 8px 20px 0 rgba(79, 70, 229, 0.32),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+    0 8px 24px 0 rgba(6, 182, 212, 0.45),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.35);
   transform: translateY(-1px);
 }
 .btn-vip-primary:active:not(:disabled) {
@@ -99,18 +154,18 @@ body {
 
 .btn-vip-secondary {
   background: #ffffff;
-  color: #1e293b;
+  color: #0E2A47;
   font-weight: 700;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  border: 1px solid #cffafe;
+  box-shadow: 0 1px 2px 0 rgba(14, 42, 71, 0.04);
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .btn-vip-secondary:hover:not(:disabled) {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-  color: #0f172a;
+  background: #ecfeff;
+  border-color: #a5f3fc;
+  color: #0891B2;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 4px 12px -2px rgba(6, 182, 212, 0.12);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -130,10 +185,17 @@ body {
   border-width: 1px;
 }
 
-.badge-vip-indigo {
-  background: #eef2ff;
-  color: #4338ca;
-  border-color: #c7d2fe;
+.badge-vip-indigo,
+.badge-vip-cyan {
+  background: #ecfeff;
+  color: #0e7490;
+  border-color: #a5f3fc;
+}
+
+.badge-vip-navy {
+  background: #eff6ff;
+  color: #1e3a8a;
+  border-color: #bfdbfe;
 }
 
 .badge-vip-emerald {
@@ -161,30 +223,31 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Background Grids, Dot Matrices & Ambient Glows
+   Background Grids, Dot Matrices & Ambient Glows (SVG Theme)
    ───────────────────────────────────────────────────────────────────────────── */
 
 .bg-dot-grid {
-  background-image: radial-gradient(rgba(148, 163, 184, 0.25) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(6, 182, 212, 0.20) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
 .bg-grid-subtle {
   background-image: 
-    linear-gradient(to right, rgba(226, 232, 240, 0.6) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(226, 232, 240, 0.6) 1px, transparent 1px);
+    linear-gradient(to right, rgba(207, 250, 254, 0.6) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(207, 250, 254, 0.6) 1px, transparent 1px);
   background-size: 28px 28px;
 }
 
-.ambient-glow-indigo {
-  background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.12) 0%, rgba(99, 102, 241, 0) 70%);
+.ambient-glow-indigo,
+.ambient-glow-brand {
+  background: radial-gradient(circle at 50% 0%, rgba(6, 182, 212, 0.18) 0%, rgba(30, 58, 138, 0.08) 45%, transparent 70%);
 }
 
 .ambient-glow-mesh {
   background-image: 
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(236, 72, 153, 0.06) 0px, transparent 50%),
-    radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(6, 182, 212, 0.12) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(30, 58, 138, 0.10) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(6, 182, 212, 0.06) 0px, transparent 50%);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -194,15 +257,15 @@ body {
 @keyframes pulse-ring {
   0% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.6);
   }
   70% {
     transform: scale(1);
-    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+    box-shadow: 0 0 0 6px rgba(6, 182, 212, 0);
   }
   100% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0);
   }
 }
 
@@ -222,11 +285,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #a5f3fc;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #06b6d4;
 }
 
 .no-scrollbar::-webkit-scrollbar {

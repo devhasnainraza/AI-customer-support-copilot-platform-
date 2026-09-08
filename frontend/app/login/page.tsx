@@ -9,6 +9,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore, getUserRole } from '@/stores/authStore'
 import Link from 'next/link'
+import { Logo } from '@/components/ui/Logo'
 
 function CustomerLoginContent() {
   const router = useRouter()
@@ -155,15 +156,7 @@ function CustomerLoginContent() {
       <header className="relative z-10 border-b border-slate-200/80 bg-white/80 backdrop-blur-md px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5 group">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white font-black text-sm shadow-xs group-hover:bg-indigo-700 transition-colors">
-              CP
-            </div>
-            <div>
-              <span className="font-display font-extrabold text-sm text-slate-900 block leading-tight">
-                Support Copilot
-              </span>
-              <span className="text-[10px] text-slate-400 font-semibold">Customer Help Center</span>
-            </div>
+            <Logo variant="full" height={36} className="group-hover:opacity-90 transition-opacity" />
           </Link>
           <div className="flex items-center gap-3">
             <Link
@@ -313,7 +306,7 @@ function CustomerLoginContent() {
                     required
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    placeholder="e.g. Hasnain Raza"
+                    placeholder="e.g. Sarah Jenkins"
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-800 shadow-2xs placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
                   />
                 </div>

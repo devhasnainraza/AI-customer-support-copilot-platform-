@@ -71,6 +71,13 @@ class AIInferenceWorker:
                 f"message={message_id}"
             )
 
+            # Check if conversation is in human-handoff — abort AI execution immediately
+            from src.services.handoff_service import handoff_manager
+            h_req = handoff_manager.get_request(conversation_id)
+            if h_req and h_req.get("status") in ("waiting", "assigned", "in_progress"):
+                logger.info(f"Skipping AI inference for conversation {conversation_id}: active human handoff ({h_req.get('status')})")
+                return
+
             # Load recent history so the bot has memory of the conversation.
             # The newest message is the one being answered, so it is dropped.
             history = []
@@ -243,7 +250,7 @@ class AIInferenceWorker:
                 if h_req and h_req.get('status') in ('waiting', 'assigned', 'in_progress'):
                     handoff_info = {
                         'status': h_req['status'],
-                        'assigned_agent': h_req.get('assigned_agent_id'),
+                        'assigned_agent': h_req.get('assigned_agent_name') or h_req.get('assigned_agent') or h_req.get('assigned_agent_id'),
                         'reason': h_req.get('reason'),
                         'priority': h_req.get('priority'),
                     }

@@ -46,7 +46,9 @@ async def _check_supabase() -> str:
 async def _check_redis() -> str:
     try:
         redis = await get_redis_client()
-        await asyncio.wait_for(redis.ping(), timeout=HEALTH_TIMEOUT)
+        if not redis:
+            return "disconnected"
+        await asyncio.wait_for(redis.ping(), timeout=1.0)
         return "connected"
     except asyncio.TimeoutError:
         logger.warning("Redis health check timed out")

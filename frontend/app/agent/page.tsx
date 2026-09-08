@@ -170,17 +170,46 @@ export default function AgentPage() {
             const data = JSON.parse(event.data)
             if (data.type === 'handoff_notification' || data.type === 'queue_updated') {
               refreshQueue()
+              if (data.type === 'handoff_notification' && data.handoff?.status === 'resolved') {
+                if (selectedHandoff?.conversation_id && (data.conversation_id === selectedHandoff.conversation_id || data.handoff?.conversation_id === selectedHandoff.conversation_id)) {
+                  setSelectedHandoff(null)
+                }
+              }
+              if (data.type === 'queue_updated' && data.resolved_conversation_id) {
+                if (selectedHandoff?.conversation_id && data.resolved_conversation_id === selectedHandoff.conversation_id) {
+                  setSelectedHandoff(null)
+                }
+              }
             }
             if (data.type === 'message') {
               const incomingConvId = data.conversation_id
               if (selectedHandoff?.conversation_id && incomingConvId === selectedHandoff.conversation_id) {
                 setChatMessages((prev) => {
-                  if (prev.some((m) => m.id === (data.message_id || data.id))) return prev
+                  const msgId = data.message_id || data.id
+                  if (prev.some((m) => m.id === msgId)) return prev
+
+                  // Deduplicate incoming agent messages that match our optimistic message
+                  const isAgentMsg = data.sender_type === 'human_agent' || data.sender === 'human_agent'
+                  if (isAgentMsg) {
+                    const optimisticIdx = prev.findIndex(
+                      (m) =>
+                        m.id.startsWith('agent-') &&
+                        m.content.trim() === (data.content || '').trim()
+                    )
+                    if (optimisticIdx !== -1) {
+                      return prev.map((m, idx) =>
+                        idx === optimisticIdx
+                          ? { ...m, id: msgId || m.id, timestamp: data.timestamp || m.timestamp }
+                          : m
+                      )
+                    }
+                  }
+
                   return [
                     ...prev,
                     {
-                      id: data.message_id || data.id || `msg-${Date.now()}`,
-                      sender_type: data.sender_type || (data.sender === 'human_agent' ? 'human_agent' : 'customer'),
+                      id: msgId || `msg-${Date.now()}`,
+                      sender_type: isAgentMsg ? 'human_agent' : (data.sender_type || (data.sender === 'customer' ? 'customer' : 'ai')),
                       content: data.content || '',
                       timestamp: data.timestamp || new Date().toISOString(),
                       agent_name: data.agent_name,
@@ -306,11 +335,19 @@ export default function AgentPage() {
     try {
       const token = await getAuthToken()
       const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      await fetch(`${API}/v1/handoff/request/${selectedHandoff.conversation_id}/message`, {
+      const res = await fetch(`${API}/v1/handoff/request/${selectedHandoff.conversation_id}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token || ''}` },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, sender_type: 'human_agent' }),
       })
+      if (res.ok) {
+        const saved = await res.json()
+        if (saved?.id) {
+          setChatMessages((prev) =>
+            prev.map((m) => (m.id === tempId ? { ...m, id: saved.id, timestamp: saved.timestamp || m.timestamp } : m))
+          )
+        }
+      }
     } catch (err) {
       console.error('Send reply failed:', err)
     }
@@ -710,7 +747,7 @@ export default function AgentPage() {
                         handleSendReply()
                       }
                     }}
-                    placeholder="Type your response to the customer... (Enter to send, Shift+Enter for newline)"
+                    placeholder="Type your response to the customer..."
                     rows={1}
                     className="flex-1 resize-none bg-transparent px-3 py-1.5 text-xs sm:text-sm font-medium text-slate-800 focus:outline-none placeholder:text-slate-400"
                     style={{ minHeight: '38px', maxHeight: '100px' }}

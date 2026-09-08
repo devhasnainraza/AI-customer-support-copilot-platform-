@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth, getUserRole } from '@/stores/authStore'
+import { Logo } from '@/components/ui/Logo'
 
 export default function Home() {
   const router = useRouter()
@@ -243,8 +244,8 @@ export default function Home() {
           
           {/* Brand Logo & Telemetry Status */}
           <Link href="/" className="flex items-center gap-3 group shrink-0">
-            <div className="relative flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-slate-900 text-white font-extrabold text-base shadow-md shadow-indigo-200 group-hover:scale-105 transition-all">
-              <span>CP</span>
+            <div className="relative">
+              <Logo variant="icon" height={42} className="group-hover:scale-105 transition-transform" />
               <span className="absolute -top-1 -right-1 flex h-3 w-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border-2 border-white" />
@@ -252,8 +253,8 @@ export default function Home() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-display font-extrabold text-base sm:text-lg text-slate-950 tracking-tight block leading-tight">
-                  SupportCopilot
+                <span className="font-display font-black text-lg text-slate-950 tracking-tight block leading-tight">
+                  Copilot <span className="bg-gradient-to-r from-cyan-600 to-blue-800 bg-clip-text text-transparent">SUPPORT</span>
                 </span>
                 <span className="badge-vip badge-vip-indigo text-[10px] hidden sm:inline-flex">
                   Enterprise
@@ -608,7 +609,7 @@ export default function Home() {
                       </div>
                       <div className="p-3 bg-indigo-950/50 border border-indigo-800 rounded-xl space-y-1.5">
                         <span className="text-[10px] font-bold text-indigo-400 uppercase">AI Copilot Suggested Reply:</span>
-                        <p className="text-xs text-slate-200">&quot;Hello Hasnain! I have your billing ledger open and can issue the adjustment right away.&quot;</p>
+                        <p className="text-xs text-slate-200">&quot;Hello Alex! I have your billing ledger open and can issue the adjustment right away.&quot;</p>
                       </div>
                       <div className="flex gap-2">
                         <button className="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-xs font-bold text-center">
@@ -878,12 +879,9 @@ export default function Home() {
             
             {/* Col 1: Brand Info */}
             <div className="col-span-2 space-y-3">
-              <div className="flex items-center gap-2.5">
-                <div className="h-8 w-8 rounded-xl bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center">
-                  CP
-                </div>
-                <span className="font-display font-extrabold text-base text-slate-900">SupportCopilot</span>
-              </div>
+              <Link href="/" className="inline-block">
+                <Logo variant="full" height={40} className="hover:opacity-90 transition-opacity" />
+              </Link>
               <p className="text-xs text-slate-500 max-w-sm font-medium leading-relaxed">
                 Enterprise-grade AI customer support platform with multi-agent LangGraph orchestration, vector knowledge retrieval, and live human specialist escalation.
               </p>

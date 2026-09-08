@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth, getUserRole } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
 import { getAuthToken } from '@/lib/api'
+import { Logo } from '@/components/ui/Logo'
 
 interface NavItem {
   name: string
@@ -460,18 +461,15 @@ function GlobalSidebarInner({
           className="flex items-center gap-2.5 overflow-hidden group"
           onClick={() => onCloseMobile?.()}
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-600 to-violet-600 text-white font-black text-sm shadow-md shadow-indigo-100 group-hover:scale-105 transition-transform shrink-0">
-            CP
-          </div>
-          {!isCollapsed && (
-            <div className="flex flex-col min-w-0 transition-opacity duration-200">
-              <span className="font-display text-sm font-extrabold tracking-tight text-slate-900 leading-tight truncate">
-                Copilot Platform
-              </span>
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 truncate">
-                {role ? `${role} portal` : 'AI Suite'}
-              </span>
-            </div>
+          {isCollapsed ? (
+            <Logo variant="icon" height={36} className="group-hover:scale-105 transition-transform" />
+          ) : (
+            <Logo
+              variant="compact"
+              height={36}
+              subtitle={role ? `${role.toUpperCase()} PORTAL` : 'SUPPORT'}
+              className="group-hover:opacity-90 transition-opacity"
+            />
           )}
         </Link>
       </div>

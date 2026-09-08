@@ -108,7 +108,7 @@ class NotificationService:
                     n.data.get("email")
                     or (n.recipient_id if "@" in n.recipient_id else None)
                     or settings.admin_notification_email
-                    or "developerhasnainraza@gmail.com"
+                    or "admin@example.com"
                 )
                 subject, html = EmailTemplate.custom(
                     to=target_email,

@@ -157,7 +157,7 @@ export default function AdminNotificationsPage() {
       setEmailStats(await statsRes.json())
       const histData = await histRes.json()
       setEmailHistory(histData.history || [])
-      setTestEmail(cfg.from_email || 'developerhasnainraza@gmail.com')
+      setTestEmail(cfg.from_email || 'admin@example.com')
     } catch {}
   }, [])
 
@@ -278,7 +278,7 @@ export default function AdminNotificationsPage() {
           title: '🚨 Multi-Channel Escalation Alert',
           message: 'Customer requested human assistance for Ticket #TICK-20260907-0002. Dispatched to WhatsApp & Email.',
           priority: 'critical',
-          to_email: emailConfig?.from_email || 'developerhasnainraza@gmail.com',
+          to_email: emailConfig?.from_email || 'admin@example.com',
           to_phone: whatsappConfig?.notification_phone || '+18005550199',
         }),
       })
@@ -844,7 +844,7 @@ export default function AdminNotificationsPage() {
             <div className="surface-vip p-5">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Sender Mode</span>
               <div className="text-base font-black font-mono text-indigo-600 mt-2">{emailConfig?.mode || 'Gmail SMTP'}</div>
-              <div className="text-[11px] text-slate-500 mt-0.5 font-medium">{emailConfig?.from_email || 'developerhasnainraza@gmail.com'}</div>
+              <div className="text-[11px] text-slate-500 mt-0.5 font-medium">{emailConfig?.from_email || 'admin@example.com'}</div>
             </div>
             <div className="surface-vip p-5 flex flex-col justify-between">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Quick Test</span>
@@ -877,7 +877,7 @@ export default function AdminNotificationsPage() {
                     type="email"
                     value={testEmail}
                     onChange={(e) => setTestEmail(e.target.value)}
-                    placeholder="developerhasnainraza@gmail.com"
+                    placeholder="admin@example.com"
                     className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 border border-slate-200"
                   />
                 </div>

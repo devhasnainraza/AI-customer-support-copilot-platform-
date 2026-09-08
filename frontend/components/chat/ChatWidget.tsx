@@ -67,7 +67,7 @@ export function ChatWidget({ conversationId, onConversationCreated }: ChatWidget
       {/* ── Top Chat Header ── */}
       <div className="border-b border-slate-200/80 bg-white/95 backdrop-blur-md px-4 sm:px-6 py-3 flex items-center justify-between z-20 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 via-violet-600 to-pink-500 text-white flex items-center justify-center font-black text-xs shadow-xs">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#06B6D4] to-[#1E3A8A] text-white flex items-center justify-center font-black text-xs shadow-xs">
             AI
           </div>
           <div>

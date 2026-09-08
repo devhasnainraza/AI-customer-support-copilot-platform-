@@ -46,6 +46,7 @@ class AgentStatusModel(BaseModel):
 
 class SendMessageModel(BaseModel):
     content: str
+    sender_type: Optional[str] = None  # "human_agent" | "customer"
 
 
 # ---------------------------------------------------------------------------
@@ -309,20 +310,42 @@ async def assign_agent_to_handoff(
     current_user: dict = Depends(get_current_user),
 ):
     """Agent claims a handoff from the queue."""
-    agent_id = body.agent_id or current_user["user_id"]
-    agent_name = current_user.get("email", "Support Specialist")
+    caller_role = current_user.get("role", "customer")
+    is_staff = caller_role in ("agent", "admin", "manager", "support_agent")
+
+    if is_staff:
+        agent_id = body.agent_id or current_user["user_id"]
+        agent_name = current_user.get("email", "Support Specialist")
+    else:
+        # If triggered from customer side (instant connect demo), never set customer email as specialist
+        agent_id = body.agent_id or "agent-specialist"
+        agent_name = "Alex Morgan (Senior Support Specialist)"
 
     success = await handoff_manager.assign_agent(conversation_id, agent_id, agent_name)
     if not success:
-        # Check if already assigned to this agent
+        # Check if already in queue/active and force update assignment
         req = handoff_manager.get_request(conversation_id)
-        if not req or req.get("status") not in ("assigned", "in_progress"):
+        if not req:
             raise HTTPException(status_code=400, detail="Cannot assign — request not found")
 
     # Mark agent as busy and start chat
     await agent_presence.set_busy(agent_id, conversation_id)
     await handoff_manager.start_chat(conversation_id)
     request = handoff_manager.get_request(conversation_id)
+
+    # Sync ticket assigned_agent and status in database
+    try:
+        from src.config.supabase import get_service_client
+        supabase = get_service_client()
+        supabase.table("tickets").update({
+            "assigned_agent_id": str(agent_id) if is_staff else None,
+            "status": "in_progress",
+        }).eq("conversation_id", conversation_id).execute()
+        supabase.table("conversations").update({
+            "status": "escalated",
+        }).eq("id", conversation_id).execute()
+    except Exception as t_err:
+        logger.warning(f"Failed to record ticket assignment in database: {t_err}")
 
     # Broadcast handoff status update to the conversation
     from datetime import datetime, timezone
@@ -335,6 +358,7 @@ async def assign_agent_to_handoff(
                 "active": True,
                 "status": "in_progress",
                 "assigned_agent": agent_name,
+                "assigned_agent_name": agent_name,
                 "assigned_agent_id": agent_id,
                 "reason": request.get("reason", "Human Specialist Handoff") if request else "Human Specialist Handoff",
                 "request_id": request.get("id") if request else conversation_id,
@@ -346,13 +370,21 @@ async def assign_agent_to_handoff(
     # Send introductory message to the conversation
     intro_content = f"Hello! Support Specialist {agent_name} has joined the chat session. How can I help you today?"
     try:
+        sender_uuid = UUID(current_user["user_id"])
+        if is_staff and body.agent_id:
+            try:
+                sender_uuid = UUID(body.agent_id)
+            except Exception:
+                pass
+
         agent_msg = await ChatService.create_message(
             MessageCreate(
                 conversation_id=UUID(conversation_id),
                 tenant_id=UUID(current_user.get("tenant_id") or "00000000-0000-0000-0000-000000000000"),
-                sender_id=UUID(agent_id),
+                sender_id=sender_uuid,
                 sender_type=SenderType.HUMAN_AGENT,
                 content=intro_content,
+                metadata={"agent_name": agent_name},
             )
         )
         msg_payload = {
@@ -407,6 +439,24 @@ async def resolve_handoff(
     agent_id = current_user["user_id"]
     await agent_presence.set_online_from_busy(agent_id)
 
+    # Sync database: Close/resolve ticket and reset conversation status
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        from src.config.supabase import get_service_client
+        supabase = get_service_client()
+        supabase.table("tickets").update({
+            "status": "resolved",
+            "resolved_at": now_iso,
+        }).eq("conversation_id", str(conversation_id)).execute()
+
+        supabase.table("conversations").update({
+            "status": "active",
+            "ai_resolution": False,
+        }).eq("id", str(conversation_id)).execute()
+    except Exception as db_err:
+        logger.warning(f"Failed to update ticket/conversation to resolved in DB: {db_err}")
+
     # Notify customer conversation
     await manager.send_to_conversation(
         {
@@ -425,6 +475,7 @@ async def resolve_handoff(
             {
                 "type": "queue_updated",
                 "queue": handoff_manager.get_queue(),
+                "resolved_conversation_id": conversation_id,
             }
         )
     except Exception:
@@ -440,6 +491,23 @@ async def cancel_handoff(
 ):
     """Cancel a handoff request and resume AI Copilot chat."""
     await handoff_manager.cancel_handoff(conversation_id)
+
+    # Sync database: Update ticket to closed/cancelled
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        from src.config.supabase import get_service_client
+        supabase = get_service_client()
+        supabase.table("tickets").update({
+            "status": "closed",
+            "resolved_at": now_iso,
+        }).eq("conversation_id", str(conversation_id)).execute()
+
+        supabase.table("conversations").update({
+            "status": "active",
+        }).eq("id", str(conversation_id)).execute()
+    except Exception as db_err:
+        logger.warning(f"Failed to cancel ticket in DB: {db_err}")
 
     # Notify customer conversation
     await manager.send_to_conversation(
@@ -459,6 +527,7 @@ async def cancel_handoff(
             {
                 "type": "queue_updated",
                 "queue": handoff_manager.get_queue(),
+                "cancelled_conversation_id": conversation_id,
             }
         )
     except Exception:
@@ -480,10 +549,29 @@ async def send_handoff_message(
 
     user_id = current_user["user_id"]
     role = current_user.get("role", "customer")
-    sender_type = SenderType.HUMAN_AGENT if role in ("agent", "admin", "manager") else SenderType.CUSTOMER
-    sender_name = current_user.get("email", "Support Specialist" if sender_type == SenderType.HUMAN_AGENT else "Customer")
 
-    # Save to DB
+    # Check conversation ownership to ensure human agent is never misidentified as customer
+    is_conv_customer = False
+    try:
+        from uuid import UUID as _UUID
+        conv = await ChatService.get_conversation(_UUID(conversation_id))
+        if conv:
+            cust_ids = {str(conv.customer_id)}
+            user_ids = {str(user_id), str(current_user.get("customer_id"))} - {None, ""}
+            if bool(cust_ids & user_ids):
+                is_conv_customer = True
+    except Exception:
+        pass
+
+    # If body explicitly specifies human_agent, or caller has staff role, or caller is NOT the customer:
+    if body.sender_type == "human_agent" or role in ("agent", "admin", "manager", "support_agent") or not is_conv_customer:
+        sender_type = SenderType.HUMAN_AGENT
+        sender_name = current_user.get("email", "Support Specialist")
+    else:
+        sender_type = SenderType.CUSTOMER
+        sender_name = current_user.get("email", "Customer")
+
+    # Save to DB with metadata
     msg = await ChatService.create_message(
         MessageCreate(
             conversation_id=UUID(conversation_id),
@@ -491,6 +579,7 @@ async def send_handoff_message(
             sender_id=UUID(user_id),
             sender_type=sender_type,
             content=content,
+            metadata={"agent_name": sender_name} if sender_type == SenderType.HUMAN_AGENT else {},
         )
     )
 
@@ -518,7 +607,7 @@ async def send_handoff_message(
         "sender_type": str(sender_type.value),
         "content": content,
         "timestamp": now_iso,
-        "agent_name": sender_name,
+        "agent_name": sender_name if sender_type == SenderType.HUMAN_AGENT else None,
     }
 
 
@@ -613,28 +702,34 @@ async def agent_websocket(
                         continue
 
                     # Save agent message
-                    await ChatService.create_message(
+                    agent_db_msg = await ChatService.create_message(
                         MessageCreate(
                             conversation_id=UUID(conv_id),
-                            tenant_id=UUID(user["tenant_id"]),
+                            tenant_id=UUID(user.get("tenant_id") or "00000000-0000-0000-0000-000000000000"),
                             sender_id=UUID(agent_id),
                             sender_type=SenderType.HUMAN_AGENT,
                             content=content,
+                            metadata={"agent_name": agent_name},
                         )
                     )
 
-                    # Broadcast to customer
-                    await manager.send_to_conversation(
-                        {
-                            "type": "message",
-                            "sender": "human_agent",
-                            "sender_type": "human_agent",
-                            "content": content,
-                            "agent_name": agent_name,
-                            "timestamp": msg.get("timestamp", ""),
-                        },
-                        conv_id,
-                    )
+                    from datetime import datetime, timezone
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    agent_msg_payload = {
+                        "type": "message",
+                        "sender": "human_agent",
+                        "sender_type": "human_agent",
+                        "content": content,
+                        "agent_name": agent_name,
+                        "message_id": str(agent_db_msg.id),
+                        "id": str(agent_db_msg.id),
+                        "conversation_id": conv_id,
+                        "timestamp": now_iso,
+                    }
+
+                    # Broadcast to customer and other agents
+                    await manager.send_to_conversation(agent_msg_payload, conv_id)
+                    await manager.broadcast_to_agents(agent_msg_payload)
 
                 elif msg_type == "typing":
                     conv_id = msg.get("conversation_id")
@@ -651,7 +746,7 @@ async def agent_websocket(
                 elif msg_type == "claim":
                     conv_id = msg.get("conversation_id")
                     if conv_id:
-                        success = await handoff_manager.assign_agent(conv_id, agent_id)
+                        success = await handoff_manager.assign_agent(conv_id, agent_id, agent_name)
                         if success:
                             await agent_presence.set_busy(agent_id, conv_id)
                             await manager.send_personal_message(
@@ -664,6 +759,32 @@ async def agent_websocket(
                     if conv_id:
                         await handoff_manager.resolve_handoff(conv_id)
                         await agent_presence.set_online_from_busy(agent_id)
+                        try:
+                            from src.config.supabase import get_service_client
+                            supabase = get_service_client()
+                            from datetime import datetime, timezone
+                            now_iso = datetime.now(timezone.utc).isoformat()
+                            supabase.table("tickets").update({
+                                "status": "resolved",
+                                "resolved_at": now_iso,
+                            }).eq("conversation_id", str(conv_id)).execute()
+                            supabase.table("conversations").update({
+                                "status": "active",
+                                "ai_resolution": False,
+                            }).eq("id", str(conv_id)).execute()
+                        except Exception as r_err:
+                            logger.warning(f"Failed to resolve ticket in DB via WS: {r_err}")
+
+                        await manager.send_to_conversation(
+                            {
+                                "type": "handoff_notification",
+                                "handoff": {"active": False, "status": "resolved"},
+                            },
+                            conv_id,
+                        )
+                        await manager.broadcast_to_agents(
+                            {"type": "queue_updated", "queue": handoff_manager.get_queue(), "resolved_conversation_id": conv_id}
+                        )
 
                 elif msg_type == "heartbeat":
                     await agent_presence.heartbeat(agent_id)

@@ -9,6 +9,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore, getUserRole } from '@/stores/authStore'
 import Link from 'next/link'
+import { Logo } from '@/components/ui/Logo'
 
 type StaffRole = 'agent' | 'manager'
 
@@ -138,17 +139,9 @@ function StaffLoginContent() {
       {/* Top Navbar */}
       <header className="relative z-10 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-black text-sm shadow-md shadow-indigo-950">
-              SP
-            </div>
-            <div>
-              <span className="font-display font-extrabold text-sm text-white block leading-tight">
-                Staff Operations Portal
-              </span>
-              <span className="text-[10px] text-slate-400 font-semibold">Authorized Personnel Gateway</span>
-            </div>
-          </div>
+          <Link href="/" className="flex items-center gap-2.5">
+            <Logo variant="full" height={36} textColor="#FFFFFF" subtitle="STAFF GATEWAY" className="hover:opacity-90 transition-opacity" />
+          </Link>
           <div>
             <span className="text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700 px-2.5 py-1 rounded-lg">
               INTERNAL USE ONLY

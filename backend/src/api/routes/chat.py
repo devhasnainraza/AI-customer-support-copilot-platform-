@@ -156,7 +156,7 @@ async def get_conversation(
             )
 
         # Verify access: allow if user owns the conversation or has staff role
-        is_staff = current_user.get("role") in ("admin", "manager", "agent")
+        is_staff = current_user.get("role") in ("admin", "manager", "agent", "support_agent")
         user_ids = {str(current_user.get("user_id")), str(current_user.get("customer_id"))} - {None, ""}
         if not is_staff and str(conversation.customer_id) not in user_ids:
             raise HTTPException(
@@ -211,7 +211,7 @@ async def get_conversation_messages(
             )
 
         # Verify access: allow if user owns the conversation or has staff role
-        is_staff = current_user.get("role") in ("admin", "manager", "agent")
+        is_staff = current_user.get("role") in ("admin", "manager", "agent", "support_agent")
         user_ids = {str(current_user.get("user_id")), str(current_user.get("customer_id"))} - {None, ""}
         if not is_staff and str(conversation.customer_id) not in user_ids:
             raise HTTPException(
@@ -225,17 +225,27 @@ async def get_conversation_messages(
             limit=limit
         )
 
-        return [
-            MessagePublic(
-                id=msg.id,
-                conversation_id=msg.conversation_id,
-                sender_type=msg.sender_type,
-                content=msg.content,
-                timestamp=msg.timestamp,
-                confidence_score=msg.confidence_score
+        result_messages = []
+        for msg in messages:
+            msg_metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+            agent_name = msg_metadata.get("agent_name")
+            if not agent_name and msg.sender_type == SenderType.HUMAN_AGENT:
+                agent_name = "Support Specialist"
+
+            result_messages.append(
+                MessagePublic(
+                    id=msg.id,
+                    conversation_id=msg.conversation_id,
+                    sender_type=msg.sender_type,
+                    content=msg.content,
+                    timestamp=msg.timestamp,
+                    confidence_score=msg.confidence_score,
+                    agent_name=agent_name,
+                    metadata=msg_metadata,
+                )
             )
-            for msg in messages
-        ]
+
+        return result_messages
 
     except HTTPException:
         raise
@@ -267,8 +277,25 @@ async def post_conversation_message(
 
     user_id = current_user["user_id"]
     role = current_user.get("role", "customer")
-    sender_type = SenderType.HUMAN_AGENT if role in ("agent", "admin", "manager") else SenderType.CUSTOMER
-    sender_name = current_user.get("email", "Support Specialist" if sender_type == SenderType.HUMAN_AGENT else "Customer")
+
+    # Check conversation ownership to ensure human agent is never misidentified as customer
+    is_conv_customer = False
+    try:
+        conv = await ChatService.get_conversation(conversation_id)
+        if conv:
+            cust_ids = {str(conv.customer_id)}
+            user_ids = {str(user_id), str(current_user.get("customer_id"))} - {None, ""}
+            if bool(cust_ids & user_ids):
+                is_conv_customer = True
+    except Exception:
+        pass
+
+    if role in ("agent", "admin", "manager") or not is_conv_customer:
+        sender_type = SenderType.HUMAN_AGENT
+        sender_name = current_user.get("email", "Support Specialist")
+    else:
+        sender_type = SenderType.CUSTOMER
+        sender_name = current_user.get("email", "Customer")
 
     msg = await ChatService.create_message(
         MessageCreate(

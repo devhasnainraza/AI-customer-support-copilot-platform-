@@ -37,12 +37,12 @@ export function getUserRole(user: User | null): UserRole {
     }
   }
 
-  // 3. Check known staff and customer emails
+  // 3. Check known staff and customer email patterns
   const email = (user.email || '').toLowerCase().trim()
-  if (email === 'developerhasnainraza@gmail.com' || email.includes('customer')) return 'customer'
-  if (email === 'mhattari1112@gmail.com' || email === 'admin@example.com' || email.startsWith('admin') || email.includes('+admin') || email.includes('admin@')) return 'admin'
-  if (email === 'info.mhraza@gmail.com' || email === 'info.mhr@gmail.com' || email.startsWith('manager') || email.includes('+manager') || email.includes('manager@')) return 'manager'
-  if (email === 'chat.hasnain@gmail.com' || email.startsWith('agent') || email.includes('+agent') || email.includes('agent@')) return 'agent'
+  if (email.includes('customer') || email.startsWith('client')) return 'customer'
+  if (email.startsWith('admin') || email.includes('+admin') || email.includes('admin@')) return 'admin'
+  if (email.startsWith('manager') || email.includes('+manager') || email.includes('manager@')) return 'manager'
+  if (email.startsWith('agent') || email.includes('+agent') || email.includes('agent@')) return 'agent'
 
   return 'customer'
 }

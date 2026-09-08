@@ -158,7 +158,7 @@ class EmailService:
         self._records: Dict[str, EmailDeliveryRecord] = {}
         self._config = {
             "api_key": os.getenv("RESEND_API_KEY", os.getenv("EMAIL_API_KEY", "")),
-            "from_email": settings.email_from or os.getenv("EMAIL_FROM", "developerhasnainraza@gmail.com"),
+            "from_email": settings.email_from or os.getenv("EMAIL_FROM", "support@example.com"),
             "from_name": os.getenv("EMAIL_FROM_NAME", "AI Support Copilot"),
         }
         self._templates: Dict[str, dict] = {

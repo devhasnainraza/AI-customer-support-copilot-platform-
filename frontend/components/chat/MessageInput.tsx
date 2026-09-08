@@ -42,7 +42,7 @@ export function MessageInput({ onSend, disabled, placeholder }: MessageInputProp
           {sendError}
         </p>
       )}
-      <div className="flex items-center gap-2 sm:gap-3 bg-white border border-slate-200/90 rounded-2xl p-2 sm:p-2.5 shadow-sm hover:border-indigo-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+      <div className="flex items-center gap-2 sm:gap-3 bg-white border border-slate-200/90 rounded-2xl p-2 sm:p-2.5 shadow-sm hover:border-cyan-300 focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-100 transition-all">
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
@@ -57,7 +57,7 @@ export function MessageInput({ onSend, disabled, placeholder }: MessageInputProp
         <button
           onClick={handleSend}
           disabled={!message.trim() || disabled || isSending}
-          className="rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 px-4 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md shadow-indigo-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shrink-0 flex items-center gap-1.5 active:scale-[0.98]"
+          className="rounded-xl bg-gradient-to-r from-[#06B6D4] to-[#1E3A8A] hover:from-[#0891B2] hover:to-[#0E2A47] px-4 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md shadow-cyan-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shrink-0 flex items-center gap-1.5 active:scale-[0.98]"
         >
           <span>{isSending ? 'Sending...' : 'Send'}</span>
           {!isSending && (

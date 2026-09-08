@@ -68,7 +68,17 @@ def _load_server_side_profile(
     Returns:
         Dict with `role`, `tenant_id`, and optional `customer_id`
     """
-    effective_role = fallback_role if fallback_role in ("admin", "manager", "agent", "customer") else DEFAULT_ROLE
+    # Infer staff roles from email if not explicitly set in token metadata
+    if not fallback_role or fallback_role == DEFAULT_ROLE:
+        em = (email or "").lower()
+        if "agent" in em:
+            fallback_role = "agent"
+        elif "admin" in em:
+            fallback_role = "admin"
+        elif "manager" in em:
+            fallback_role = "manager"
+
+    effective_role = fallback_role if fallback_role in ("admin", "manager", "agent", "support_agent", "customer") else DEFAULT_ROLE
     effective_tenant = fallback_tenant or DEFAULT_TENANT_ID
 
     profile = {"role": effective_role, "tenant_id": effective_tenant}
@@ -98,8 +108,8 @@ def _load_server_side_profile(
 
         if row:
             db_role = row.get("role")
-            # If user registered as admin/manager but db row had customer, upgrade db row
-            if fallback_role in ("admin", "manager") and db_role != fallback_role:
+            # If user registered as admin/manager/agent but db row had customer, upgrade db row
+            if fallback_role in ("admin", "manager", "agent") and db_role != fallback_role:
                 try:
                     supabase.table("customers").update({"role": fallback_role}).eq("id", row["id"]).execute()
                     db_role = fallback_role

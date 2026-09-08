@@ -174,10 +174,10 @@ class HandoffManager:
             return request
 
     async def assign_agent(self, conversation_id: str, agent_id: str, agent_name: Optional[str] = None) -> bool:
-        """Assign an agent to a handoff request."""
+        """Assign an agent to a handoff request (allows re-assigning active chats)."""
         async with self._lock:
             request = self._queue.get(conversation_id)
-            if not request or request.status != "waiting":
+            if not request or request.status not in ("waiting", "assigned", "in_progress"):
                 return False
 
             now = datetime.now(timezone.utc)
@@ -261,7 +261,50 @@ class HandoffManager:
 
     def get_request(self, conversation_id: str) -> Optional[dict]:
         request = self._queue.get(conversation_id) or self._history.get(conversation_id)
-        return request.to_dict() if request else None
+        if request:
+            return request.to_dict()
+
+        # Database fallback: Check if a ticket exists for this conversation in active handoff
+        try:
+            from src.config.supabase import get_service_client
+            supabase = get_service_client()
+            res = (
+                supabase.table("tickets")
+                .select("id, ticket_number, conversation_id, status, priority, category, ai_summary, created_at, assigned_agent_id")
+                .eq("conversation_id", str(conversation_id))
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                t = res.data[0]
+                t_status = t.get("status")
+                if t_status in ("open", "escalated", "in_progress", "pending"):
+                    agent_name = None
+                    if t.get("assigned_agent_id"):
+                        try:
+                            a_res = supabase.table("customers").select("email, name").eq("id", str(t["assigned_agent_id"])).limit(1).execute()
+                            if a_res.data:
+                                agent_name = a_res.data[0].get("name") or a_res.data[0].get("email")
+                        except Exception:
+                            pass
+
+                    status_val = "in_progress" if (t_status == "in_progress" or t.get("assigned_agent_id")) else "waiting"
+                    req = HandoffRequest(
+                        conversation_id=str(conversation_id),
+                        customer_id="",
+                        tenant_id="",
+                        reason=t.get("ai_summary") or f"Ticket #{t.get('ticket_number')}",
+                        priority=(t.get("priority") or "medium").lower(),
+                    )
+                    req.status = status_val
+                    req.assigned_agent_id = str(t.get("assigned_agent_id")) if t.get("assigned_agent_id") else None
+                    req.assigned_agent_name = agent_name or req.assigned_agent_id
+                    self._queue[str(conversation_id)] = req
+                    return req.to_dict()
+        except Exception as e:
+            logger.warning(f"Failed to lookup handoff ticket from DB: {e}")
+
+        return None
 
     def get_stats(self) -> dict:
         waiting = len([r for r in self._queue.values() if r.status == "waiting"])

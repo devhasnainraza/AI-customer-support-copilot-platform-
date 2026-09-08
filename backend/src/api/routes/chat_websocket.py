@@ -156,7 +156,18 @@ async def websocket_endpoint(
                     # Check if conversation is in human-handoff — skip AI
                     from src.services.handoff_service import handoff_manager
                     handoff = handoff_manager.get_request(conversation_id)
-                    is_human_chat = handoff and handoff.get("status") in ("waiting", "assigned", "in_progress")
+                    is_human_chat = bool(handoff and handoff.get("status") in ("waiting", "assigned", "in_progress"))
+
+                    # Persistent DB check to guarantee no AI interruption during active human sessions
+                    if not is_human_chat:
+                        try:
+                            from src.config.supabase import get_service_client
+                            supabase = get_service_client()
+                            t_db = supabase.table("tickets").select("id, status").eq("conversation_id", str(conversation_id)).in_("status", ["open", "escalated", "in_progress"]).limit(1).execute()
+                            if t_db.data:
+                                is_human_chat = True
+                        except Exception:
+                            pass
 
                     if is_human_chat:
                         # Broadcast customer message to all connected agents
@@ -174,7 +185,7 @@ async def websocket_endpoint(
                         await manager.broadcast_to_agents(msg_payload)
 
                         # If in waiting queue, acknowledge waiting status
-                        if handoff.get("status") == "waiting":
+                        if handoff and handoff.get("status") == "waiting":
                             await manager.send_to_conversation(
                                 {
                                     "type": "handoff_notification",

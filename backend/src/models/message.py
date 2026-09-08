@@ -73,8 +73,11 @@ class MessagePublic(BaseModel):
     timestamp: datetime
     confidence_score: Optional[float] = None
     sources: Optional[List[dict]] = None  # Transformed from retrieved_chunks
+    agent_name: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
 
 
 class MessageWithSources(MessagePublic):
     """Message with populated source information"""
     sources: List[dict] = Field(default_factory=list)
+

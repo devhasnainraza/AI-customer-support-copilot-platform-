@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase, updatePassword } from '@/lib/supabase'
 import Link from 'next/link'
+import { Logo } from '@/components/ui/Logo'
 
 export default function ResetPasswordPage() {
   const router = useRouter()

@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     email_from: str = "noreply@example.com"
-    admin_notification_email: str = "developerhasnainraza@gmail.com"
+    admin_notification_email: str = "admin@example.com"
 
     # WhatsApp Business API Configuration
     whatsapp_access_token: str = ""

@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import { Message } from '@/stores/chatStore'
 import { SourceCitation } from './SourceCitation'
 import Markdown from 'react-markdown'
+import { Logo } from '@/components/ui/Logo'
 
 interface MessageListProps {
   messages: Message[]
@@ -44,8 +45,8 @@ export function MessageList({ messages, isTyping, typingAgent, onSelectPrompt }:
       <div className="max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
         {messages.length === 0 && (
           <div className="flex flex-1 flex-col items-center justify-center py-10 sm:py-16 px-4 text-center animate-fade-in">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-violet-600 to-pink-500 flex items-center justify-center text-white text-xl font-black shadow-lg shadow-indigo-100 mb-4 ring-4 ring-indigo-50">
-              C
+            <div className="mb-4">
+              <Logo variant="icon" height={56} className="shadow-lg shadow-cyan-100/50 rounded-2xl ring-4 ring-cyan-50" />
             </div>
             <h2 className="font-display text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               How can I help you today?
@@ -59,10 +60,10 @@ export function MessageList({ messages, isTyping, typingAgent, onSelectPrompt }:
                 <button
                   key={i}
                   onClick={() => onSelectPrompt?.(prompt)}
-                  className="p-3.5 text-left text-xs font-bold text-slate-700 rounded-2xl bg-white border border-slate-200/90 hover:border-indigo-400 hover:text-indigo-600 hover:shadow-md hover:shadow-indigo-50 transition-all cursor-pointer group flex items-center justify-between shadow-2xs"
+                  className="p-3.5 text-left text-xs font-bold text-slate-700 rounded-2xl bg-white border border-slate-200/90 hover:border-cyan-400 hover:text-cyan-700 hover:shadow-md hover:shadow-cyan-100 transition-all cursor-pointer group flex items-center justify-between shadow-2xs"
                 >
                   <span>{prompt}</span>
-                  <span className="text-slate-300 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all text-xs font-black">
+                  <span className="text-slate-300 group-hover:text-cyan-600 group-hover:translate-x-1 transition-all text-xs font-black">
                     →
                   </span>
                 </button>
@@ -77,15 +78,15 @@ export function MessageList({ messages, isTyping, typingAgent, onSelectPrompt }:
 
         {isTyping && (
           <div className="flex items-end gap-3 justify-start animate-fade-in" role="status" aria-label="AI is typing">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center text-white text-xs font-black shrink-0 shadow-xs">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#06B6D4] to-[#1E3A8A] flex items-center justify-center text-white text-xs font-black shrink-0 shadow-xs">
               AI
             </div>
             <div className="rounded-2xl rounded-bl-xs bg-white border border-slate-200/90 px-4 py-3 shadow-xs">
               <div className="flex items-center gap-2.5">
                 <div className="flex space-x-1">
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-indigo-500" style={{ animationDelay: '0ms' }} />
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-violet-500" style={{ animationDelay: '150ms' }} />
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-pink-500" style={{ animationDelay: '300ms' }} />
+                  <div className="h-2 w-2 animate-bounce rounded-full bg-cyan-500" style={{ animationDelay: '0ms' }} />
+                  <div className="h-2 w-2 animate-bounce rounded-full bg-blue-600" style={{ animationDelay: '150ms' }} />
+                  <div className="h-2 w-2 animate-bounce rounded-full bg-slate-800" style={{ animationDelay: '300ms' }} />
                 </div>
                 <span className="text-xs font-bold text-slate-500">
                   {typingAgent ? `${typingAgent} is responding...` : 'AI Copilot is thinking...'}
@@ -127,7 +128,7 @@ function MessageBubble({
           className={`w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-black shrink-0 shadow-xs ${
             isHuman
               ? 'bg-gradient-to-tr from-emerald-600 to-teal-600'
-              : 'bg-gradient-to-tr from-indigo-600 to-violet-600'
+              : 'bg-gradient-to-tr from-[#06B6D4] to-[#1E3A8A]'
           }`}
         >
           {isHuman ? message.agent_name?.charAt(0)?.toUpperCase() || 'H' : 'AI'}
@@ -153,7 +154,7 @@ function MessageBubble({
         <div
           className={`rounded-2xl px-4.5 py-3.5 text-xs sm:text-sm leading-relaxed ${
             isCustomer
-              ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-br-xs shadow-md shadow-indigo-100 font-medium'
+              ? 'bg-gradient-to-r from-[#06B6D4] to-[#1E3A8A] text-white rounded-br-xs shadow-md shadow-cyan-100/50 font-medium'
               : isHuman
               ? 'bg-emerald-50/90 border border-emerald-200 text-slate-900 rounded-bl-xs shadow-xs'
               : 'bg-white border border-slate-200/90 text-slate-800 rounded-bl-xs shadow-xs'

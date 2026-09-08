@@ -97,11 +97,11 @@ async def list_agents(role: Optional[str] = None):
 
             # Infer role if not explicitly tagged
             if not u_role or u_role == "customer":
-                if u_email.startswith("agent") or "agent" in u_email or u_email == "chat.hasnain@gmail.com":
+                if u_email.startswith("agent") or "agent" in u_email:
                     u_role = "agent"
-                elif u_email.startswith("manager") or "manager" in u_email or u_email in ("info.mhr@gmail.com", "info.mhraza@gmail.com"):
+                elif u_email.startswith("manager") or "manager" in u_email:
                     u_role = "manager"
-                elif u_email.startswith("admin") or "admin" in u_email or u_email == "mhattari1112@gmail.com":
+                elif u_email.startswith("admin") or "admin" in u_email:
                     u_role = "admin"
 
             # Only include staff roles (agent, manager, admin)
