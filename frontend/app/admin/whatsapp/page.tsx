@@ -3,16 +3,13 @@
 import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/stores/authStore"
-import { RoleGuard } from "@/components/auth/RoleGuard"
-import { AdminSidebar } from "@/components/admin/AdminSidebar"
 import { useWhatsAppSocket, WhatsAppEvent } from "@/hooks/useWhatsAppSocket"
+import { getAuthHeaders } from "@/lib/api"
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
-function getHeaders() {
-  const raw = localStorage.getItem("supabase.auth.token") || ""
-  const token = raw.replace(/^"|"$/g, "")
-  return { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
+async function getHeaders() {
+  return await getAuthHeaders()
 }
 
 type Tab = "overview" | "conversations" | "templates" | "analytics" | "webhook"
@@ -108,11 +105,12 @@ export default function AdminWhatsAppPage() {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
+      const headers = await getHeaders()
       const [cfgRes, convRes, tplRes, anaRes] = await Promise.allSettled([
-        fetch(`${API}/v1/whatsapp/config`, { headers: getHeaders() }).then((r) => r.json()),
-        fetch(`${API}/v1/whatsapp/conversations`, { headers: getHeaders() }).then((r) => r.json()),
-        fetch(`${API}/v1/whatsapp/templates`, { headers: getHeaders() }).then((r) => r.json()),
-        fetch(`${API}/v1/whatsapp/analytics`, { headers: getHeaders() }).then((r) => r.json()),
+        fetch(`${API}/v1/whatsapp/config`, { headers }).then((r) => r.json()),
+        fetch(`${API}/v1/whatsapp/conversations`, { headers }).then((r) => r.json()),
+        fetch(`${API}/v1/whatsapp/templates`, { headers }).then((r) => r.json()),
+        fetch(`${API}/v1/whatsapp/analytics`, { headers }).then((r) => r.json()),
       ])
       if (cfgRes.status === "fulfilled") setConfig(cfgRes.value)
       if (convRes.status === "fulfilled") setConversations(convRes.value.conversations || [])
@@ -189,9 +187,10 @@ export default function AdminWhatsAppPage() {
   const handleSaveConfig = async () => {
     setSaving(true)
     try {
+      const headers = await getHeaders()
       const res = await fetch(`${API}/v1/whatsapp/configure`, {
         method: "POST",
-        headers: getHeaders(),
+        headers,
         body: JSON.stringify({
           access_token: form.access_token,
           phone_number_id: form.phone_number_id,
@@ -205,30 +204,32 @@ export default function AdminWhatsAppPage() {
       if (res.ok) {
         const data = await res.json()
         setConfig(data)
-        setTestResult("✅ Connected successfully!")
+        setTestResult("Connected successfully")
       } else {
-        setTestResult("❌ Connection failed — check your credentials")
+        setTestResult("Connection failed — check your credentials")
       }
     } catch {
-      setTestResult("❌ Network error — is the backend running?")
+      setTestResult("Network error — is the backend running?")
     } finally {
       setSaving(false)
     }
   }
 
   const handleDisconnect = async () => {
-    await fetch(`${API}/v1/whatsapp/disconnect`, { method: "POST", headers: getHeaders() })
+    const headers = await getHeaders()
+    await fetch(`${API}/v1/whatsapp/disconnect`, { method: "POST", headers })
     setConfig((c) => (c ? { ...c, connected: false } : c))
   }
 
   const handleTestConnection = async () => {
     setTestResult("Testing...")
     try {
-      const res = await fetch(`${API}/v1/whatsapp/test-connection`, { method: "POST", headers: getHeaders() })
+      const headers = await getHeaders()
+      const res = await fetch(`${API}/v1/whatsapp/test-connection`, { method: "POST", headers })
       const data = await res.json()
-      setTestResult(data.status === "ok" ? "✅ Connection healthy" : "❌ Connection failed")
+      setTestResult(data.status === "ok" ? "Connection healthy" : "Connection failed")
     } catch {
-      setTestResult("❌ Backend not reachable")
+      setTestResult("Backend not reachable")
     }
   }
 
@@ -236,9 +237,10 @@ export default function AdminWhatsAppPage() {
     if (!sendForm.to_number || !sendForm.message) return
     setSending(true)
     try {
+      const headers = await getHeaders()
       await fetch(`${API}/v1/whatsapp/send/text`, {
         method: "POST",
-        headers: getHeaders(),
+        headers,
         body: JSON.stringify(sendForm),
       })
       setSendForm({ to_number: "", message: "" })
@@ -249,7 +251,8 @@ export default function AdminWhatsAppPage() {
 
   const handleSyncTemplates = async () => {
     try {
-      const res = await fetch(`${API}/v1/whatsapp/templates/sync`, { method: "POST", headers: getHeaders() })
+      const headers = await getHeaders()
+      const res = await fetch(`${API}/v1/whatsapp/templates/sync`, { method: "POST", headers })
       const data = await res.json()
       setTemplates(data.templates || [])
     } catch {}
@@ -257,12 +260,13 @@ export default function AdminWhatsAppPage() {
 
   const handleCreateTemplate = async () => {
     try {
+      const headers = await getHeaders()
       const params = tplForm.parameters
         ? tplForm.parameters.split(",").map((p, i) => ({ type: "text", text: `{{${i + 1}}}` }))
         : []
       await fetch(`${API}/v1/whatsapp/templates`, {
         method: "POST",
-        headers: getHeaders(),
+        headers,
         body: JSON.stringify({ ...tplForm, parameters: params }),
       })
       setTplForm({ name: "", language: "en", category: "UTILITY", body: "", parameters: "" })
@@ -271,24 +275,66 @@ export default function AdminWhatsAppPage() {
   }
 
   const handleDeleteTemplate = async (name: string) => {
-    await fetch(`${API}/v1/whatsapp/templates/${name}`, { method: "DELETE", headers: getHeaders() })
+    const headers = await getHeaders()
+    await fetch(`${API}/v1/whatsapp/templates/${name}`, { method: "DELETE", headers })
     setTemplates((t) => t.filter((tpl) => tpl.name !== name))
   }
 
   const loadConversation = async (id: string) => {
     try {
-      const res = await fetch(`${API}/v1/whatsapp/conversations/${id}`, { headers: getHeaders() })
+      const headers = await getHeaders()
+      const res = await fetch(`${API}/v1/whatsapp/conversations/${id}`, { headers })
       const data = await res.json()
       setSelectedConv(data)
     } catch {}
   }
 
-  const tabs: { key: Tab; label: string; icon: string }[] = [
-    { key: "overview", label: "Overview", icon: "📊" },
-    { key: "conversations", label: "Conversations", icon: "💬" },
-    { key: "templates", label: "Templates", icon: "📝" },
-    { key: "analytics", label: "Analytics", icon: "📈" },
-    { key: "webhook", label: "Webhook", icon: "🔗" },
+  const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
+    {
+      key: "overview",
+      label: "Overview",
+      icon: (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+        </svg>
+      ),
+    },
+    {
+      key: "conversations",
+      label: "Conversations",
+      icon: (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+        </svg>
+      ),
+    },
+    {
+      key: "templates",
+      label: "Templates",
+      icon: (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      ),
+    },
+    {
+      key: "analytics",
+      label: "Analytics",
+      icon: (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+      ),
+    },
+    {
+      key: "webhook",
+      label: "Webhook",
+      icon: (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+        </svg>
+      ),
+    },
   ]
 
   if (authLoading || !isAuthenticated) {
@@ -300,123 +346,120 @@ export default function AdminWhatsAppPage() {
   }
 
   return (
-    <RoleGuard allowedRoles={["admin"]}>
-      <div className="flex h-screen bg-[#fbfbfa] bg-dot-grid text-slate-800 overflow-hidden">
-        {/* Toast Notification */}
-        {toast && (
-          <div className="fixed top-4 right-4 z-50 animate-[slideUp_0.3s_ease-out]">
-            <div className={`px-5 py-3 rounded-2xl shadow-2xl border text-xs font-bold flex items-center gap-3 backdrop-blur-md ${
-              toast.type === "error" ? "bg-red-50/95 border-red-200 text-red-700" : toast.type === "success" ? "bg-emerald-50/95 border-emerald-200 text-emerald-700" : "bg-indigo-50/95 border-indigo-200 text-indigo-700"
-            }`}>
-              <span className="text-lg">{toast.type === "error" ? "❌" : toast.type === "success" ? "✅" : "💬"}</span>
-              <span className="max-w-xs truncate">{toast.message}</span>
-              <button onClick={() => setToast(null)} className="ml-2 text-slate-400 hover:text-slate-600">✕</button>
+    <div className="space-y-6 animate-fade-in">
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed top-4 right-4 z-50 animate-[slideUp_0.3s_ease-out]">
+          <div className={`px-5 py-3 rounded-2xl shadow-2xl border text-xs font-bold flex items-center gap-3 backdrop-blur-md ${
+            toast.type === "error" ? "bg-red-50/95 border-red-200 text-red-700" : toast.type === "success" ? "bg-emerald-50/95 border-emerald-200 text-emerald-700" : "bg-indigo-50/95 border-indigo-200 text-indigo-700"
+          }`}>
+            <span className="shrink-0">
+              {toast.type === "error" ? (
+                <svg className="w-4 h-4 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </span>
+            <span className="max-w-xs truncate">{toast.message}</span>
+            <button onClick={() => setToast(null)} className="ml-2 text-slate-400 hover:text-slate-600">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Header Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200/80 pb-6">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center font-bold shadow-2xs">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="font-display text-2xl font-extrabold tracking-tight text-slate-900 leading-tight">
+                WhatsApp Business Cloud Integration
+              </h1>
+              <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                Connect Meta WhatsApp Business API, manage templates, and oversee omnichannel chats.
+              </p>
             </div>
           </div>
-        )}
+        </div>
 
-        <AdminSidebar />
-        <main className="flex-1 flex flex-col overflow-hidden">
-          {/* Header */}
-          <header className="p-6 border-b border-slate-200/80 bg-white/80 backdrop-blur-md sticky top-0 z-20">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-                  <span className="text-2xl">📱</span> WhatsApp Business Integration
-                </h1>
-                <p className="text-xs text-slate-500 mt-0.5">Connect, manage, and monitor WhatsApp conversations</p>
-              </div>
-              <div className="flex items-center gap-3">
-                {wsConnected && (
-                  <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-extrabold border border-blue-200">
-                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" /> Live
-                  </span>
-                )}
-                {wsStatus === "reconnecting" && (
-                  <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-extrabold border border-amber-200">
-                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" /> Reconnecting...
-                  </span>
-                )}
-                {config?.connected && (
-                  <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-extrabold border border-emerald-200">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> Connected
-                  </span>
-                )}
-                <button onClick={fetchAll} className="px-3.5 py-2 text-xs font-bold rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 shadow-sm">
-                  🔄 Refresh
-                </button>
-              </div>
-            </div>
+        {/* Tab Navigation */}
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 rounded-2xl border border-slate-200 shrink-0">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                tab === t.key
+                  ? "bg-white text-indigo-600 shadow-xs"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              {t.icon}
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
-            {/* Tab bar */}
-            <div className="flex gap-1 mt-4 -mb-px">
-              {tabs.map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => setTab(t.key)}
-                  className={`px-4 py-2 text-xs font-bold rounded-t-xl border-b-2 transition-all ${
-                    tab === t.key
-                      ? "border-indigo-600 text-indigo-700 bg-white"
-                      : "border-transparent text-slate-400 hover:text-slate-600"
-                  }`}
-                >
-                  {t.icon} {t.label}
-                </button>
-              ))}
-            </div>
-          </header>
-
-          <div className="flex-1 overflow-y-auto p-6">
-            {loading ? (
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-24 bg-slate-100 rounded-2xl animate-pulse" />
-                ))}
+      {loading ? (
+        <div className="flex h-64 items-center justify-center text-slate-500 text-xs font-semibold">
+          <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mr-2" />
+          <span>Loading WhatsApp configuration...</span>
+        </div>
+      ) : (
+        <>
+          {/* ── SETUP / OVERVIEW TAB ─────────────────────────────── */}
+          {tab === "overview" && (
+            <div className="max-w-4xl w-full mx-auto space-y-6">
+              {/* Connection Status Card */}
+              <div className="surface-vip p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className={`w-3 h-3 rounded-full ${config?.connected ? "bg-emerald-500 radar-live" : "bg-slate-300"}`} />
+                  <div>
+                    <h2 className="text-sm font-extrabold text-slate-900">
+                      {config?.connected ? `Connected: ${config.business_name || config.display_phone_number}` : "WhatsApp Not Connected"}
+                    </h2>
+                    <p className="text-xs text-slate-500 font-medium">
+                      {config?.connected ? `Active on ${config.display_phone_number}` : "Configure your Meta WhatsApp Business API credentials below"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {config?.connected ? (
+                    <>
+                      <button
+                        onClick={handleTestConnection}
+                        className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                      >
+                        Test Ping
+                      </button>
+                      <button
+                        onClick={handleDisconnect}
+                        className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-colors cursor-pointer border border-rose-200"
+                      >
+                        Disconnect
+                      </button>
+                    </>
+                  ) : null}
+                </div>
               </div>
-            ) : (
-              <>
-                {/* ── OVERVIEW TAB ─────────────────────────────────────── */}
-                {tab === "overview" && (
-                  <div className="max-w-5xl w-full mx-auto space-y-6">
-                    {/* Connection Status Card */}
-                    <div className={`rounded-2xl p-6 border shadow-sm ${config?.connected ? "bg-gradient-to-br from-emerald-50 to-green-50 border-emerald-200" : "bg-gradient-to-br from-slate-50 to-gray-50 border-slate-200"}`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center gap-3 mb-2">
-                            <div className={`w-4 h-4 rounded-full ${config?.connected ? "bg-emerald-500 animate-pulse" : "bg-slate-300"}`} />
-                            <h2 className="text-sm font-extrabold text-slate-900">
-                              {config?.connected ? "WhatsApp Connected" : "Not Connected"}
-                            </h2>
-                          </div>
-                          {config?.connected ? (
-                            <div className="text-xs text-slate-600 space-y-1 ml-7">
-                              <p><span className="font-bold">Business:</span> {config.business_name}</p>
-                              <p><span className="font-bold">Phone:</span> {config.display_phone_number || config.phone_number_id}</p>
-                              <p><span className="font-bold">Webhook:</span> {config.webhook_configured ? "✅ Configured" : "⚠️ Not set up"}</p>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-slate-500 ml-7">Configure your Meta WhatsApp Business API credentials below to start messaging.</p>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          {config?.connected && (
-                            <>
-                              <button onClick={handleTestConnection} className="px-3 py-2 text-xs font-bold rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 shadow-sm">
-                                🧪 Test
-                              </button>
-                              <button onClick={handleDisconnect} className="px-3 py-2 text-xs font-bold rounded-xl bg-red-50 border border-red-200 hover:bg-red-100 text-red-700 shadow-sm">
-                                ⏏️ Disconnect
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      {testResult && (
-                        <div className="mt-4 ml-7 px-3 py-2 rounded-xl bg-white/80 border border-slate-200 text-xs font-semibold text-slate-700">
-                          {testResult}
-                        </div>
-                      )}
-                    </div>
+              {testResult && (
+                <div className="px-4 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-xs font-bold text-slate-700">
+                  {testResult}
+                </div>
+              )}
 
                     {/* Quick Stats */}
                     {analytics && (
@@ -498,8 +541,14 @@ export default function AdminWhatsAppPage() {
                               >
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center text-white text-xs font-bold">
-                                      {c.customer_name?.charAt(0) || "📱"}
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center text-white text-xs font-bold shadow-2xs">
+                                      {c.customer_name?.charAt(0) ? (
+                                        c.customer_name.charAt(0).toUpperCase()
+                                      ) : (
+                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                        </svg>
+                                      )}
                                     </div>
                                     <div>
                                       <p className="text-xs font-bold text-slate-900">{c.customer_name || "Unknown"}</p>
@@ -528,8 +577,14 @@ export default function AdminWhatsAppPage() {
                           <>
                             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                               <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center text-white text-sm font-bold">
-                                  {selectedConv.customer_name?.charAt(0) || "📱"}
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center text-white text-sm font-bold shadow-2xs">
+                                  {selectedConv.customer_name?.charAt(0) ? (
+                                    selectedConv.customer_name.charAt(0).toUpperCase()
+                                  ) : (
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                    </svg>
+                                  )}
                                 </div>
                                 <div>
                                   <p className="text-sm font-bold text-slate-900">{selectedConv.customer_name || "Unknown"}</p>
@@ -596,8 +651,11 @@ export default function AdminWhatsAppPage() {
                   <div className="max-w-5xl w-full mx-auto space-y-6">
                     <div className="flex items-center justify-between">
                       <h2 className="text-sm font-extrabold text-slate-900">Message Templates ({templates.length})</h2>
-                      <button onClick={handleSyncTemplates} className="px-3.5 py-2 text-xs font-bold rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 shadow-sm">
-                        🔄 Sync from Meta
+                      <button onClick={handleSyncTemplates} className="px-3.5 py-2 text-xs font-bold rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 shadow-sm flex items-center gap-1.5 cursor-pointer">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span>Sync from Meta</span>
                       </button>
                     </div>
 
@@ -617,7 +675,7 @@ export default function AdminWhatsAppPage() {
                           <option value="MARKETING">Marketing</option>
                           <option value="AUTHENTICATION">Authentication</option>
                         </select>
-                        <button onClick={handleCreateTemplate} disabled={!tplForm.name} className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm">
+                        <button onClick={handleCreateTemplate} disabled={!tplForm.name} className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm cursor-pointer">
                           + Create
                         </button>
                       </div>
@@ -638,7 +696,11 @@ export default function AdminWhatsAppPage() {
                                 </span>
                               </div>
                             </div>
-                            <button onClick={() => handleDeleteTemplate(t.name)} className="text-slate-400 hover:text-red-500 text-xs">✕</button>
+                            <button onClick={() => handleDeleteTemplate(t.name)} className="text-slate-400 hover:text-red-500 text-xs cursor-pointer p-1">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
                           </div>
                           {t.parameters.length > 0 && (
                             <p className="text-[10px] text-slate-400 mt-2">Parameters: {t.parameters.length}</p>
@@ -655,13 +717,43 @@ export default function AdminWhatsAppPage() {
                   <div className="max-w-5xl w-full mx-auto space-y-6">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       {[
-                        { label: "Total Conversations", value: analytics.total_conversations, icon: "💬" },
-                        { label: "Active Now", value: analytics.active_conversations, icon: "🟢" },
-                        { label: "Inbound Messages", value: analytics.inbound_messages, icon: "📥" },
-                        { label: "Outbound Messages", value: analytics.outbound_messages, icon: "📤" },
+                        {
+                          label: "Total Conversations",
+                          value: analytics.total_conversations,
+                          icon: (
+                            <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            </svg>
+                          )
+                        },
+                        {
+                          label: "Active Now",
+                          value: analytics.active_conversations,
+                          icon: (
+                            <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block radar-live" />
+                          )
+                        },
+                        {
+                          label: "Inbound Messages",
+                          value: analytics.inbound_messages,
+                          icon: (
+                            <svg className="w-5 h-5 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                            </svg>
+                          )
+                        },
+                        {
+                          label: "Outbound Messages",
+                          value: analytics.outbound_messages,
+                          icon: (
+                            <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                            </svg>
+                          )
+                        },
                       ].map((s) => (
                         <div key={s.label} className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm">
-                          <span className="text-lg">{s.icon}</span>
+                          <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center mb-1">{s.icon}</div>
                           <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mt-1">{s.label}</span>
                           <div className="text-2xl font-extrabold text-slate-900 mt-1">{s.value}</div>
                         </div>
@@ -767,12 +859,36 @@ export default function AdminWhatsAppPage() {
                       <h3 className="text-sm font-extrabold text-slate-900 mb-3">Supported Webhook Events</h3>
                       <div className="space-y-2">
                         {[
-                          { event: "messages", desc: "Incoming messages from customers", icon: "📨" },
-                          { event: "statuses", desc: "Delivery and read receipts", icon: "✅" },
-                          { event: "message_template_status_update", desc: "Template approval/rejection", icon: "📝" },
+                          {
+                            event: "messages",
+                            desc: "Incoming messages from customers",
+                            icon: (
+                              <svg className="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                              </svg>
+                            )
+                          },
+                          {
+                            event: "statuses",
+                            desc: "Delivery and read receipts",
+                            icon: (
+                              <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )
+                          },
+                          {
+                            event: "message_template_status_update",
+                            desc: "Template approval/rejection",
+                            icon: (
+                              <svg className="w-4 h-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                            )
+                          },
                         ].map((e) => (
                           <div key={e.event} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200/60">
-                            <span className="text-lg">{e.icon}</span>
+                            <div className="w-8 h-8 rounded-lg bg-white border border-slate-200/60 flex items-center justify-center shrink-0">{e.icon}</div>
                             <div>
                               <p className="text-xs font-bold text-slate-900 font-mono">{e.event}</p>
                               <p className="text-[10px] text-slate-500">{e.desc}</p>
@@ -785,9 +901,6 @@ export default function AdminWhatsAppPage() {
                 )}
               </>
             )}
-          </div>
-        </main>
-      </div>
-    </RoleGuard>
+    </div>
   )
 }

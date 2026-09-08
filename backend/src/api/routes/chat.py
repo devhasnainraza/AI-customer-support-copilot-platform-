@@ -70,10 +70,14 @@ async def create_conversation(
                 detail=f"Language '{language}' not supported"
             )
 
+        # Resolve effective customer_id
+        cust_id_raw = current_user.get("customer_id") or current_user.get("user_id")
+        tenant_id_raw = current_user.get("tenant_id") or "00000000-0000-0000-0000-000000000000"
+
         # Create conversation
         conversation = await ChatService.create_conversation(
-            customer_id=UUID(current_user["user_id"]),
-            tenant_id=UUID(current_user["tenant_id"]),
+            customer_id=UUID(str(cust_id_raw)),
+            tenant_id=UUID(str(tenant_id_raw)),
             language=language
         )
 
@@ -103,17 +107,14 @@ async def get_conversations(
 ):
     """
     T050: Get all conversations for current user
-
-    Args:
-        limit: Maximum number of conversations to return
-        current_user: Authenticated user
-
-    Returns:
-        List of conversations
     """
     try:
+        cid = UUID(str(current_user["customer_id"])) if "customer_id" in current_user else UUID(str(current_user["user_id"]))
+        alt_id = UUID(str(current_user["user_id"])) if "customer_id" in current_user else None
+
         conversations = await ChatService.get_customer_conversations(
-            customer_id=UUID(current_user["user_id"]),
+            customer_id=cid,
+            alternate_customer_id=alt_id,
             limit=limit
         )
 
@@ -144,13 +145,6 @@ async def get_conversation(
 ):
     """
     T051: Get a specific conversation
-
-    Args:
-        conversation_id: Conversation UUID
-        current_user: Authenticated user
-
-    Returns:
-        Conversation details
     """
     try:
         conversation = await ChatService.get_conversation(conversation_id)
@@ -161,8 +155,10 @@ async def get_conversation(
                 detail="Conversation not found"
             )
 
-        # Verify access (user owns the conversation)
-        if str(conversation.customer_id) != current_user["user_id"]:
+        # Verify access: allow if user owns the conversation or has staff role
+        is_staff = current_user.get("role") in ("admin", "manager", "agent")
+        user_ids = {str(current_user.get("user_id")), str(current_user.get("customer_id"))} - {None, ""}
+        if not is_staff and str(conversation.customer_id) not in user_ids:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"
@@ -214,7 +210,10 @@ async def get_conversation_messages(
                 detail="Conversation not found"
             )
 
-        if str(conversation.customer_id) != current_user["user_id"]:
+        # Verify access: allow if user owns the conversation or has staff role
+        is_staff = current_user.get("role") in ("admin", "manager", "agent")
+        user_ids = {str(current_user.get("user_id")), str(current_user.get("customer_id"))} - {None, ""}
+        if not is_staff and str(conversation.customer_id) not in user_ids:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"
@@ -246,3 +245,62 @@ async def get_conversation_messages(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve messages"
         )
+
+
+class MessagePostRequest(BaseModel):
+    content: str
+
+
+@router.post("/conversations/{conversation_id}/messages", response_model=MessagePublic, status_code=status.HTTP_201_CREATED)
+async def post_conversation_message(
+    conversation_id: UUID,
+    req: MessagePostRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Post a message to a conversation via REST (agent or customer).
+    Broadcasts in real-time to active WebSocket clients.
+    """
+    content = req.content.strip()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message cannot be empty")
+
+    user_id = current_user["user_id"]
+    role = current_user.get("role", "customer")
+    sender_type = SenderType.HUMAN_AGENT if role in ("agent", "admin", "manager") else SenderType.CUSTOMER
+    sender_name = current_user.get("email", "Support Specialist" if sender_type == SenderType.HUMAN_AGENT else "Customer")
+
+    msg = await ChatService.create_message(
+        MessageCreate(
+            conversation_id=conversation_id,
+            tenant_id=UUID(current_user.get("tenant_id") or "00000000-0000-0000-0000-000000000000"),
+            sender_id=UUID(user_id),
+            sender_type=sender_type,
+            content=content,
+        )
+    )
+
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    msg_payload = {
+        "type": "message",
+        "sender": "human_agent" if sender_type == SenderType.HUMAN_AGENT else "customer",
+        "sender_type": "human_agent" if sender_type == SenderType.HUMAN_AGENT else "customer",
+        "content": content,
+        "agent_name": sender_name if sender_type == SenderType.HUMAN_AGENT else None,
+        "message_id": str(msg.id),
+        "id": str(msg.id),
+        "conversation_id": str(conversation_id),
+        "timestamp": now_iso,
+    }
+    await manager.send_to_conversation(msg_payload, str(conversation_id))
+    await manager.broadcast_to_agents(msg_payload)
+
+    return MessagePublic(
+        id=msg.id,
+        conversation_id=msg.conversation_id,
+        sender_type=msg.sender_type,
+        content=msg.content,
+        timestamp=msg.timestamp,
+        confidence_score=msg.confidence_score,
+    )

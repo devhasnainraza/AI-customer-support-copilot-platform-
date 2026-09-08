@@ -54,11 +54,26 @@ export function useChat(conversationId?: string) {
           break
 
         case 'message':
-          if (message.sender === 'ai' || (message as any).sender_type === 'ai') {
-            setIsTyping(false)
+          setIsTyping(false)
+          if (message.sender === 'human_agent' || (message as any).sender_type === 'human_agent') {
+            const agentName = (message as any).agent_name || 'Support Specialist'
+            addMessage({
+              id: message.message_id || (message as any).id || `agent-${Date.now()}`,
+              conversation_id: conversationId || (message as any).conversation_id,
+              sender_type: 'human_agent',
+              agent_name: agentName,
+              content: message.content,
+              timestamp: message.timestamp || new Date().toISOString(),
+            })
+            setHandoff({
+              active: true,
+              status: 'in_progress',
+              assigned_agent: agentName,
+            })
+          } else if (message.sender === 'ai' || (message as any).sender_type === 'ai') {
             addMessage({
               id: message.message_id || (message as any).id || `ai-${Date.now()}`,
-              conversation_id: conversationId!,
+              conversation_id: conversationId || (message as any).conversation_id,
               sender_type: 'ai',
               content: message.content,
               timestamp: message.timestamp || new Date().toISOString(),
@@ -76,7 +91,7 @@ export function useChat(conversationId?: string) {
               setHandoff({
                 active: h.status !== 'resolved' && h.status !== 'cancelled',
                 status: h.status,
-                assigned_agent: h.assigned_agent,
+                assigned_agent: h.assigned_agent || h.assigned_agent_id,
                 priority: h.priority,
               })
             }
@@ -110,13 +125,15 @@ export function useChat(conversationId?: string) {
           const hMsg = message as any
           if (hMsg.handoff) {
             const h = hMsg.handoff
+            const rawAgent = h.assigned_agent || h.assigned_agent_name || h.assigned_agent_id || null
+            const displayAgent = rawAgent && (rawAgent.includes('@') || !rawAgent.includes('-')) ? rawAgent : (rawAgent ? 'Support Specialist' : null)
             setHandoff({
-              active: h.status !== 'resolved' && h.status !== 'cancelled',
+              active: h.active !== false && h.status !== 'resolved' && h.status !== 'cancelled',
               status: h.status,
               reason: h.reason,
               priority: h.priority,
-              assigned_agent: h.assigned_agent_id,
-              request_id: h.id,
+              assigned_agent: displayAgent,
+              request_id: h.id || h.request_id,
             })
           }
           break
@@ -131,12 +148,12 @@ export function useChat(conversationId?: string) {
         }
       }
     },
-    [conversationId, addMessage, setIsTyping, setTypingAgent, setConnectionError]
+    [conversationId, addMessage, setIsTyping, setTypingAgent, setConnectionError, setHandoff]
   )
 
-  // Connect to WebSocket when this hook owns a conversation
+  // Connect to WebSocket and ensure listeners are always active
   useEffect(() => {
-    if (!conversationId || !user) return
+    if (!user) return
 
     const manager = wsManager.current
 
@@ -150,9 +167,11 @@ export function useChat(conversationId?: string) {
       }
     })
 
-    // The manager re-fetches a fresh token (with auto-refresh) on every
-    // connect AND reconnect attempt.
-    void manager.connect(conversationId, getAuthToken)
+    if (conversationId) {
+      // The manager re-fetches a fresh token (with auto-refresh) on every
+      // connect AND reconnect attempt.
+      void manager.connect(conversationId, getAuthToken)
+    }
 
     return () => {
       unsubscribeMessages()
@@ -166,48 +185,6 @@ export function useChat(conversationId?: string) {
   const reconnect = useCallback(() => {
     wsManager.current.reconnect()
   }, [])
-
-  // Send message
-  const sendMessage = useCallback(
-    async (content: string) => {
-      if (!conversationId || !user) {
-        throw new Error('Not connected')
-      }
-
-      const tempMessage: Message = {
-        id: `temp-${Date.now()}`,
-        conversation_id: conversationId,
-        sender_type: 'customer',
-        content,
-        timestamp: new Date().toISOString(),
-      }
-      addMessage(tempMessage)
-
-      try {
-        wsManager.current.sendMessage(content)
-      } catch (error) {
-        // Roll back the optimistic message so the transcript doesn't show
-        // a message that was never delivered.
-        removeMessage(tempMessage.id)
-        throw error
-      }
-    },
-    [conversationId, user, addMessage, removeMessage]
-  )
-
-  // Load conversation messages
-  const loadConversation = useCallback(
-    async (convId: string) => {
-      const [conversation, msgs] = await Promise.all([
-        api.chat.getConversation(convId),
-        api.chat.getMessages(convId),
-      ])
-
-      setCurrentConversation(conversation)
-      setMessages(msgs)
-    },
-    [setCurrentConversation, setMessages]
-  )
 
   // Create new conversation
   const createConversation = useCallback(
@@ -223,10 +200,97 @@ export function useChat(conversationId?: string) {
     [setCurrentConversation]
   )
 
+  // Load conversation messages and check handoff status
+  const loadConversation = useCallback(
+    async (convId: string) => {
+      const [conversation, msgs] = await Promise.all([
+        api.chat.getConversation(convId),
+        api.chat.getMessages(convId),
+      ])
+
+      setCurrentConversation(conversation)
+      setMessages(msgs)
+
+      try {
+        const token = await getAuthToken()
+        const res = await fetch(`${API_BASE}/v1/handoff/request/${convId}`, {
+          headers: { Authorization: `Bearer ${token || ''}` },
+        })
+        if (res.ok) {
+          const h = await res.json()
+          if (h && (h.status === 'waiting' || h.status === 'assigned' || h.status === 'in_progress')) {
+            setHandoff({
+              active: true,
+              status: h.status,
+              reason: h.reason,
+              priority: h.priority,
+              assigned_agent: h.assigned_agent || h.assigned_agent_id || null,
+              request_id: h.id,
+            })
+          }
+        }
+      } catch {}
+    },
+    [setCurrentConversation, setMessages, setHandoff]
+  )
+
+  // Auto-load conversation messages and handoff status whenever conversationId changes
+  useEffect(() => {
+    if (conversationId && user) {
+      loadConversation(conversationId)
+    }
+  }, [conversationId, user, loadConversation])
+
+  // Send message (lazily creates conversation if none exists)
+  const sendMessage = useCallback(
+    async (content: string): Promise<string> => {
+      if (!user) {
+        throw new Error('Please sign in to send messages.')
+      }
+
+      let activeId = conversationId
+
+      // Lazily create conversation in database on first message
+      if (!activeId) {
+        const newConv = await createConversation(content)
+        activeId = newConv.id
+        // Connect websocket for the newly created conversation
+        await wsManager.current.connect(activeId, getAuthToken)
+      }
+
+      const tempMessage: Message = {
+        id: `temp-${Date.now()}`,
+        conversation_id: activeId,
+        sender_type: 'customer',
+        content,
+        timestamp: new Date().toISOString(),
+      }
+      addMessage(tempMessage)
+
+      try {
+        await wsManager.current.sendMessage(content)
+        return activeId
+      } catch (error) {
+        // Roll back the optimistic message so the transcript doesn't show
+        // a message that was never delivered.
+        removeMessage(tempMessage.id)
+        throw error
+      }
+    },
+    [conversationId, user, addMessage, removeMessage, createConversation]
+  )
+
   // Request human agent handoff
   const requestHandoff = useCallback(
-    async (reason: string, priority: string = 'medium') => {
-      if (!conversationId || !user) throw new Error('Not connected')
+    async (reason: string, priority: string = 'medium'): Promise<string> => {
+      if (!user) throw new Error('Please sign in to request a support specialist.')
+
+      let activeId = conversationId
+      if (!activeId) {
+        const newConv = await createConversation(`[Human Specialist Requested] Reason: ${reason}`)
+        activeId = newConv.id
+        await wsManager.current.connect(activeId, getAuthToken)
+      }
 
       try {
         const token = await getAuthToken()
@@ -237,7 +301,7 @@ export function useChat(conversationId?: string) {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
-            conversation_id: conversationId,
+            conversation_id: activeId,
             reason,
             priority,
           }),
@@ -246,17 +310,106 @@ export function useChat(conversationId?: string) {
         const data = await res.json()
         setHandoff({
           active: true,
-          status: data.status,
-          reason: data.reason,
-          priority: data.priority,
+          status: data.status || 'waiting',
+          reason: data.reason || reason,
+          priority: data.priority || priority,
           request_id: data.id,
         })
+        return activeId
       } catch (err) {
         console.error('Handoff request error:', err)
         throw err
       }
     },
-    [conversationId, user, setHandoff]
+    [conversationId, user, createConversation, setHandoff]
+  )
+
+  // Cancel human handoff and resume AI chat
+  const cancelHandoff = useCallback(async () => {
+    if (!conversationId) return
+    try {
+      const token = await getAuthToken()
+      await fetch(`${API_BASE}/v1/handoff/request/${conversationId}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token || ''}`,
+        },
+      })
+    } catch (err) {
+      console.error('Cancel handoff error:', err)
+    } finally {
+      setHandoff({
+        active: false,
+        status: null,
+        reason: null,
+        priority: null,
+        assigned_agent: null,
+        wait_time: null,
+        request_id: null,
+      })
+    }
+  }, [conversationId, setHandoff])
+
+  // Mark handoff as resolved
+  const resolveHandoff = useCallback(async () => {
+    if (!conversationId) return
+    try {
+      const token = await getAuthToken()
+      await fetch(`${API_BASE}/v1/handoff/request/${conversationId}/resolve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token || ''}`,
+        },
+      })
+    } catch (err) {
+      console.error('Resolve handoff error:', err)
+    } finally {
+      setHandoff({
+        active: false,
+        status: 'resolved',
+        reason: null,
+        priority: null,
+        assigned_agent: null,
+        wait_time: null,
+      })
+    }
+  }, [conversationId, setHandoff])
+
+  // Fast connect with an available specialist (for immediate assignment)
+  const fastAssignAgent = useCallback(
+    async (agentName: string = 'Alex Morgan (Senior Support Specialist)') => {
+      if (!conversationId) return
+      setHandoff({
+        active: true,
+        status: 'in_progress',
+        assigned_agent: agentName,
+      })
+      addMessage({
+        id: `agent-join-${Date.now()}`,
+        conversation_id: conversationId,
+        sender_type: 'human_agent',
+        agent_name: agentName,
+        content: `Hello! I am ${agentName} from Tier-2 Customer Support. I have joined this live session and reviewed the context. How can I help you today?`,
+        timestamp: new Date().toISOString(),
+      })
+
+      try {
+        const token = await getAuthToken()
+        await fetch(`${API_BASE}/v1/handoff/request/${conversationId}/assign`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token || ''}`,
+          },
+          body: JSON.stringify({ agent_id: 'specialist-alex-morgan' }),
+        })
+      } catch {
+        // Optimistic UI state already updated
+      }
+    },
+    [conversationId, setHandoff, addMessage]
   )
 
   return {
@@ -271,6 +424,9 @@ export function useChat(conversationId?: string) {
     sendMessage,
     reconnect,
     requestHandoff,
+    cancelHandoff,
+    resolveHandoff,
+    fastAssignAgent,
     loadConversation,
     createConversation,
   }

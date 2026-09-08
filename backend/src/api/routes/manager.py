@@ -1,13 +1,18 @@
 """Manager API Routes - Team Metrics, Escalation Reviews, Reports"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 import logging
 
+from src.api.middleware.auth import require_role
 from src.services.manager_service import manager_service
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/v1/manager", tags=["manager"])
+router = APIRouter(
+    prefix="/v1/manager",
+    tags=["manager"],
+    dependencies=[Depends(require_role(["manager", "admin"]))]
+)
 
 class EscalationAction(BaseModel):
     notes: str = ""

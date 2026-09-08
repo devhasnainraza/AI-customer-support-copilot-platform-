@@ -101,6 +101,7 @@ class HandoffRequest:
         self.status = "waiting"  # waiting | assigned | in_progress | resolved | cancelled
         self.context = context or {}
         self.assigned_agent_id: Optional[str] = None
+        self.assigned_agent_name: Optional[str] = None
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.assigned_at: Optional[str] = None
         self.resolved_at: Optional[str] = None
@@ -118,6 +119,8 @@ class HandoffRequest:
             "status": self.status,
             "context": self.context,
             "assigned_agent_id": self.assigned_agent_id,
+            "assigned_agent": self.assigned_agent_name or self.assigned_agent_id,
+            "assigned_agent_name": self.assigned_agent_name or self.assigned_agent_id,
             "created_at": self.created_at,
             "assigned_at": self.assigned_at,
             "resolved_at": self.resolved_at,
@@ -170,7 +173,7 @@ class HandoffManager:
             )
             return request
 
-    async def assign_agent(self, conversation_id: str, agent_id: str) -> bool:
+    async def assign_agent(self, conversation_id: str, agent_id: str, agent_name: Optional[str] = None) -> bool:
         """Assign an agent to a handoff request."""
         async with self._lock:
             request = self._queue.get(conversation_id)
@@ -180,6 +183,7 @@ class HandoffManager:
             now = datetime.now(timezone.utc)
             request.status = "assigned"
             request.assigned_agent_id = agent_id
+            request.assigned_agent_name = agent_name or agent_id
             request.assigned_at = now.isoformat()
 
             # Calculate wait time
@@ -187,7 +191,7 @@ class HandoffManager:
             request.wait_time_seconds = (now - created).total_seconds()
 
             logger.info(
-                f"Agent {agent_id} assigned to conversation {conversation_id} "
+                f"Agent {agent_name or agent_id} ({agent_id}) assigned to conversation {conversation_id} "
                 f"(waited {request.wait_time_seconds:.0f}s)"
             )
             return True

@@ -117,6 +117,8 @@ class AIInferenceWorker:
                 'original_response': None,
                 # Follow-up suggestions
                 'suggested_followups': [],
+                # Handoff priority
+                'handoff_priority': None,
                 # Metadata
                 'error': None,
                 'step_count': 0
@@ -136,11 +138,46 @@ class AIInferenceWorker:
 
             set_step_callback(emit_agent_status)
 
-            # Run LangGraph workflow (T057)
+            # Run LangGraph workflow (T057) with timeout
+            final_state = {}
             try:
-                final_state = await run_agent_workflow(initial_state)
+                final_state = await asyncio.wait_for(run_agent_workflow(initial_state), timeout=15.0)
+            except asyncio.TimeoutError:
+                logger.error(f"LangGraph workflow timed out for conversation {conversation_id}")
+                user_text = (content or "").lower()
+                is_esc = any(kw in user_text for kw in ["human", "agent", "person", "specialist", "representative"])
+                if is_esc:
+                    final_state = {
+                        'intent': 'escalation_request',
+                        'should_escalate': True,
+                        'ai_response': "I am transferring your request to our live human support team right away. A support specialist has been notified and will assist you shortly.",
+                        'confidence_score': 1.0,
+                    }
+                else:
+                    final_state = {
+                        'intent': 'question',
+                        'should_escalate': False,
+                        'ai_response': "I apologize for the delay. I am ready to help—please let me know what questions or issues you are experiencing.",
+                        'confidence_score': 0.8,
+                    }
+            except Exception as graph_err:
+                logger.error(f"LangGraph execution error: {graph_err}", exc_info=True)
+                final_state = {
+                    'intent': 'other',
+                    'should_escalate': False,
+                    'ai_response': "I apologize, but I encountered a temporary error. Please let me know how I can help or click 'Talk to Human' to reach a specialist.",
+                    'confidence_score': 0.5,
+                }
             finally:
                 clear_step_callback()
+                try:
+                    # Explicitly turn off typing indicator
+                    await ws_manager.send_to_conversation(
+                        {"type": "typing", "is_typing": False},
+                        conversation_id
+                    )
+                except Exception:
+                    pass
 
             # Extract results
             ai_response = final_state.get('ai_response')

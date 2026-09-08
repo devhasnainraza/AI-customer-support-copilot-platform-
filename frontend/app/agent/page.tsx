@@ -60,9 +60,10 @@ export default function AgentPage() {
   const chatEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<ReturnType<typeof getWebSocketManager> | null>(null)
 
-  // Agent presence
+  // Agent presence & responsive view mode
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [myStatus, setMyStatus] = useState<'online' | 'away'>('online')
+  const [mobileTab, setMobileTab] = useState<'queue' | 'chat' | 'notes'>('chat')
 
   // AI Copilot
   const [suggestedReplies, setSuggestedReplies] = useState<string[]>([])
@@ -84,15 +85,18 @@ export default function AgentPage() {
   useEffect(() => {
     if (!isAuthenticated || role === 'customer') return
 
+    let heartbeatTimer: NodeJS.Timeout | null = null
+
     async function init() {
       try {
-        const token = getAuthToken()
+        const token = await getAuthToken()
+        const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
         // Register as online
-        await fetch('/api/v1/handoff/agent/online', {
+        await fetch(`${API}/v1/handoff/agent/online`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token || ''}` },
         })
-        // Fetch queue
+        // Fetch queue & agents
         await refreshQueue()
       } catch (err) {
         console.error('Agent init error:', err)
@@ -102,78 +106,148 @@ export default function AgentPage() {
     }
     init()
 
+    // Send heartbeat every 25 seconds
+    heartbeatTimer = setInterval(async () => {
+      try {
+        const token = await getAuthToken()
+        const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        await fetch(`${API}/v1/handoff/agent/online`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token || ''}` },
+        })
+      } catch {}
+    }, 25000)
+
     return () => {
-      // Disconnect on unmount
-      const t = getAuthToken()
-      fetch('/api/v1/handoff/agent/disconnect', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${t}` },
-      }).catch(() => {})
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
     }
   }, [isAuthenticated, role])
 
   const refreshQueue = async () => {
     try {
-      const token = getAuthToken()
-      const res = await fetch('/api/v1/handoff/queue', {
-        headers: { Authorization: `Bearer ${token}` },
+      const token = await getAuthToken()
+      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const res = await fetch(`${API}/v1/handoff/queue`, {
+        headers: { Authorization: `Bearer ${token || ''}` },
       })
-      const data = await res.json()
-      setQueue(data.queue || [])
+      if (res.ok) {
+        const data = await res.json()
+        setQueue(data.queue || [])
+      }
       // Also fetch agents
-      const agentsRes = await fetch('/api/v1/handoff/agents', {
-        headers: { Authorization: `Bearer ${token}` },
+      const agentsRes = await fetch(`${API}/v1/handoff/agents`, {
+        headers: { Authorization: `Bearer ${token || ''}` },
       })
-      const agentsData = await agentsRes.json()
-      setAgents(agentsData.agents || [])
+      if (agentsRes.ok) {
+        const agentsData = await agentsRes.json()
+        setAgents(agentsData.agents || [])
+      }
     } catch (err) {
       console.error('Failed to fetch queue:', err)
     }
   }
 
-  // Connect WebSocket for real-time updates
+  // Connect Agent WebSocket for real-time updates and notifications
   useEffect(() => {
     if (!isAuthenticated || role === 'customer') return
 
-    const mgr = getWebSocketManager()
-    wsRef.current = mgr
+    let socket: WebSocket | null = null
+    let pollTimer: NodeJS.Timeout | null = null
+    let isMounted = true
 
-    const unsub = mgr.subscribe((msg: WebSocketMessage) => {
-      if (msg.type === 'message' && (msg as any).conversation_id === selectedHandoff?.conversation_id) {
-        setChatMessages(prev => [...prev, {
-          id: (msg as any).message_id || `msg-${Date.now()}`,
-          sender_type: (msg as any).sender_type || 'customer',
-          content: msg.content || '',
-          timestamp: msg.timestamp || new Date().toISOString(),
-          agent_name: (msg as any).agent_name,
-        }])
-      }
-      if (msg.type === 'typing') {
-        setIsCustomerTyping((msg as any).is_typing || false)
-      }
-    })
+    async function connectAgentWs() {
+      try {
+        const token = await getAuthToken()
+        if (!token || !isMounted) return
 
-    return () => unsub()
+        const wsBase = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000'
+        const wsUrl = `${wsBase}/v1/handoff/ws/agent?token=${encodeURIComponent(token)}`
+
+        socket = new WebSocket(wsUrl)
+
+        socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            if (data.type === 'handoff_notification' || data.type === 'queue_updated') {
+              refreshQueue()
+            }
+            if (data.type === 'message') {
+              const incomingConvId = data.conversation_id
+              if (selectedHandoff?.conversation_id && incomingConvId === selectedHandoff.conversation_id) {
+                setChatMessages((prev) => {
+                  if (prev.some((m) => m.id === (data.message_id || data.id))) return prev
+                  return [
+                    ...prev,
+                    {
+                      id: data.message_id || data.id || `msg-${Date.now()}`,
+                      sender_type: data.sender_type || (data.sender === 'human_agent' ? 'human_agent' : 'customer'),
+                      content: data.content || '',
+                      timestamp: data.timestamp || new Date().toISOString(),
+                      agent_name: data.agent_name,
+                    },
+                  ]
+                })
+              } else {
+                refreshQueue()
+              }
+            }
+            if (data.type === 'typing' || data.type === 'agent_typing') {
+              if (selectedHandoff?.conversation_id && data.conversation_id === selectedHandoff.conversation_id) {
+                setIsCustomerTyping(data.is_typing || false)
+              }
+            }
+          } catch (e) {
+            console.error('Error parsing agent ws message:', e)
+          }
+        }
+
+        socket.onerror = () => {}
+      } catch (err) {
+        console.error('Agent WS connect error:', err)
+      }
+    }
+
+    connectAgentWs()
+
+    // Background queue refresh polling every 6 seconds as a robust fallback
+    pollTimer = setInterval(() => {
+      refreshQueue()
+    }, 6000)
+
+    return () => {
+      isMounted = false
+      if (pollTimer) clearInterval(pollTimer)
+      if (socket) {
+        socket.close()
+      }
+    }
   }, [isAuthenticated, role, selectedHandoff?.conversation_id])
 
   // Load chat messages when selecting a handoff
   useEffect(() => {
-    if (!selectedHandoff) { setChatMessages([]); return }
+    if (!selectedHandoff) {
+      setChatMessages([])
+      return
+    }
 
     async function loadMessages() {
       try {
-        const token = getAuthToken()
-        const res = await fetch(`/api/v1/chat/conversations/${selectedHandoff!.conversation_id}/messages?limit=50`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const token = await getAuthToken()
+        const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const res = await fetch(`${API}/v1/chat/conversations/${selectedHandoff!.conversation_id}/messages?limit=100`, {
+          headers: { Authorization: `Bearer ${token || ''}` },
         })
         if (res.ok) {
           const msgs = await res.json()
-          setChatMessages(msgs.map((m: any) => ({
-            id: m.id,
-            sender_type: m.sender_type,
-            content: m.content,
-            timestamp: m.timestamp,
-          })))
+          setChatMessages(
+            msgs.map((m: any) => ({
+              id: m.id,
+              sender_type: m.sender_type,
+              content: m.content,
+              timestamp: m.timestamp,
+              agent_name: m.agent_name,
+            }))
+          )
         }
       } catch (err) {
         console.error('Failed to load messages:', err)
@@ -182,7 +256,7 @@ export default function AgentPage() {
     loadMessages()
     setNotes(selectedHandoff.internal_notes || [])
     generateAiSuggestions(selectedHandoff)
-  }, [selectedHandoff?.id])
+  }, [selectedHandoff?.conversation_id])
 
   // Auto-scroll chat
   useEffect(() => {
@@ -193,16 +267,13 @@ export default function AgentPage() {
   const generateAiSuggestions = async (handoff: HandoffItem) => {
     setAiCopilotLoading(true)
     try {
-      const token = getAuthToken()
       const ctx = handoff.context || {}
       const summary = (ctx.ai_summary as string) || handoff.reason || ''
-      const sentiment = (ctx.sentiment as string) || 'neutral'
-      const priority = handoff.priority
 
       setSuggestedReplies([
-        `I understand your concern about "${summary.slice(0, 60)}...". I'm here to help resolve this right away.`,
-        `I've reviewed your case and I'm looking into this now. Let me pull up the details.`,
-        `I sincerely apologize for the inconvenience. Let me get this sorted for you immediately.`,
+        `I understand your request regarding "${summary.slice(0, 50)}...". I am here to help resolve this.`,
+        `I've reviewed your conversation history and account details. Let me look into this right now.`,
+        `Thank you for your patience. I have escalated this issue and am working on an immediate solution.`,
       ])
     } catch {
       setSuggestedReplies([])
@@ -217,44 +288,48 @@ export default function AgentPage() {
     const content = replyText.trim()
     setReplyText('')
 
-    try {
-      const token = getAuthToken()
-      // Save message
-      await fetch(`/api/v1/chat/conversations/${selectedHandoff.conversation_id}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ content }),
-      }).catch(() => {})
+    const tempId = `agent-${Date.now()}`
+    const agentName = user?.email || 'Support Specialist'
 
-      // Add to local state
-      setChatMessages(prev => [...prev, {
-        id: `agent-${Date.now()}`,
+    // Optimistically add to local state
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: tempId,
         sender_type: 'human_agent',
         content,
         timestamp: new Date().toISOString(),
-        agent_name: user?.email || 'Agent',
-      }])
+        agent_name: agentName,
+      },
+    ])
+
+    try {
+      const token = await getAuthToken()
+      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      await fetch(`${API}/v1/handoff/request/${selectedHandoff.conversation_id}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token || ''}` },
+        body: JSON.stringify({ content }),
+      })
     } catch (err) {
-      console.error('Send failed:', err)
+      console.error('Send reply failed:', err)
     }
   }
 
   // Claim handoff
   const handleClaim = async (handoff: HandoffItem) => {
     try {
-      const token = getAuthToken()
-      await fetch(`/api/v1/handoff/request/${handoff.conversation_id}/assign`, {
+      const token = await getAuthToken()
+      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      await fetch(`${API}/v1/handoff/request/${handoff.conversation_id}/assign`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token || ''}` },
         body: JSON.stringify({ agent_id: user?.id }),
-      })
-      await fetch(`/api/v1/handoff/request/${handoff.conversation_id}/start`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
       })
       setMyStatus('online')
       await refreshQueue()
       setSelectedHandoff({ ...handoff, status: 'in_progress', assigned_agent_id: user?.id || '' })
+      setMobileTab('chat')
     } catch (err) {
       console.error('Claim failed:', err)
     }
@@ -264,10 +339,11 @@ export default function AgentPage() {
   const handleResolve = async () => {
     if (!selectedHandoff) return
     try {
-      const token = getAuthToken()
-      await fetch(`/api/v1/handoff/request/${selectedHandoff.conversation_id}/resolve`, {
+      const token = await getAuthToken()
+      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      await fetch(`${API}/v1/handoff/request/${selectedHandoff.conversation_id}/resolve`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token || ''}` },
       })
       setSelectedHandoff(null)
       await refreshQueue()
@@ -280,10 +356,11 @@ export default function AgentPage() {
   const handleAddNote = async () => {
     if (!noteText.trim() || !selectedHandoff) return
     try {
-      const token = getAuthToken()
-      const res = await fetch(`/api/v1/handoff/request/${selectedHandoff.conversation_id}/notes`, {
+      const token = await getAuthToken()
+      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const res = await fetch(`${API}/v1/handoff/request/${selectedHandoff.conversation_id}/notes`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token || ''}` },
         body: JSON.stringify({ content: noteText.trim() }),
       })
       if (res.ok) {
@@ -300,10 +377,11 @@ export default function AgentPage() {
   const toggleStatus = async () => {
     const newStatus = myStatus === 'online' ? 'away' : 'online'
     try {
-      const token = getAuthToken()
-      await fetch('/api/v1/handoff/agent/status', {
+      const token = await getAuthToken()
+      const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      await fetch(`${API}/v1/handoff/agent/status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token || ''}` },
         body: JSON.stringify({ status: newStatus }),
       })
       setMyStatus(newStatus)
@@ -323,114 +401,166 @@ export default function AgentPage() {
   const formatTime = (ts: string) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
   return (
-    <div className="min-h-screen bg-[#fbfbfa] bg-dot-grid text-slate-900 flex flex-col">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-200/80">
-        <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-white font-extrabold text-lg shadow-md">C</div>
-              <span className="font-bold text-lg text-slate-900">Copilot Portal</span>
-            </Link>
-            <span className="text-slate-300">/</span>
-            <span className="text-sm font-semibold text-slate-600">Agent Handoff Workspace</span>
+    <div className="flex-1 flex flex-col overflow-hidden animate-fade-in p-4 sm:p-6">
+      {/* Workspace Sub-Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200/80 pb-4 mb-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-xl font-black tracking-tight text-slate-900">
+              Escalation Command Center
+            </h1>
+            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+              Live Workstation
+            </span>
           </div>
-          <div className="flex items-center gap-3">
-            {/* Agent online count */}
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-bold text-slate-600">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              {agents.filter(a => a.status === 'online').length} agents online
-            </div>
-            {/* My status toggle */}
+          <p className="text-xs text-slate-500 mt-0.5">
+            Real-time human-agent handoffs, AI suggested replies, sentiment analysis, and queue SLA monitor.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* Agent online count */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 shadow-xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 radar-live" />
+            <span>{Math.max(myStatus === 'online' ? 1 : 0, agents.filter((a) => a.status === 'online').length)} agents online</span>
+          </div>
+
+          {/* My status toggle */}
+          <button
+            onClick={toggleStatus}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border shadow-xs ${
+              myStatus === 'online'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-amber-50 text-amber-700 border-amber-200'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${myStatus === 'online' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            <span>Status: {myStatus === 'online' ? 'Online' : 'Away'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Responsive Mobile / Tablet Tab Switcher */}
+      <div className="lg:hidden flex items-center gap-1.5 p-1 bg-slate-100/80 rounded-2xl mb-4 border border-slate-200 shrink-0">
+        <button
+          onClick={() => setMobileTab('queue')}
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            mobileTab === 'queue'
+              ? 'bg-white text-indigo-600 shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+          </svg>
+          <span>Queue ({queue.filter((q) => q.status === 'waiting').length})</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('chat')}
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            mobileTab === 'chat'
+              ? 'bg-white text-indigo-600 shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          <span>Active Chat</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('notes')}
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            mobileTab === 'notes'
+              ? 'bg-white text-indigo-600 shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <span>Notes &amp; Team</span>
+        </button>
+      </div>
+
+      {/* Main Workspace — Spacious 3-column layout */}
+      <div className="flex-1 min-h-0 max-w-[1800px] w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4 overflow-hidden h-full">
+        {/* LEFT: Escalation Queue (3 cols) */}
+        <div className={`lg:col-span-3 bg-white border border-slate-200/80 rounded-2xl flex flex-col shadow-xs overflow-hidden h-full ${
+          mobileTab === 'queue' ? 'flex' : 'hidden lg:flex'
+        }`}>
+          <div className="p-3.5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
+            <h2 className="text-xs font-black uppercase tracking-wider text-slate-600">
+              Escalations ({queue.filter(q => ['waiting', 'open', 'escalated'].includes(q.status)).length} Waiting)
+            </h2>
             <button
-              onClick={toggleStatus}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer border ${
-                myStatus === 'online'
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-amber-50 text-amber-700 border-amber-200'
-              }`}
+              onClick={refreshQueue}
+              className="p-1 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer"
+              title="Refresh queue"
             >
-              <span className={`w-2 h-2 rounded-full ${myStatus === 'online' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-              {myStatus === 'online' ? 'Online' : 'Away'}
-            </button>
-            {role === 'admin' && (
-              <Link href="/admin" className="text-xs font-bold text-slate-600 hover:text-indigo-600 transition-colors">
-                Admin Dashboard →
-              </Link>
-            )}
-            <button
-              onClick={() => void logout()}
-              className="rounded-xl border border-rose-200/80 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 text-xs font-bold text-rose-700 transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
-            >
-              Sign Out
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
           </div>
-        </div>
-      </header>
 
-      {/* Main Workspace — 3-column layout */}
-      <div className="flex-1 max-w-[1600px] w-full mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* LEFT: Escalation Queue */}
-        <div className="lg:col-span-3 bg-white border border-slate-200/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-100">
-            <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">
-              Escalation Queue ({queue.filter(q => q.status === 'waiting').length})
-            </h2>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
             {isLoading ? (
               [...Array(4)].map((_, i) => <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />)
             ) : queue.length === 0 ? (
-              <div className="text-center py-12 text-slate-400 text-xs">No pending escalations</div>
+              <div className="text-center py-16 text-slate-400 text-xs font-medium">No pending escalations in queue</div>
             ) : (
               queue.map((item) => {
-                const isSelected = selectedHandoff?.id === item.id
+                const isSelected = selectedHandoff?.id === item.id || selectedHandoff?.conversation_id === item.conversation_id
+                const isWaiting = ['waiting', 'open', 'escalated'].includes(item.status)
+                const isActive = ['assigned', 'in_progress'].includes(item.status)
                 const priorityColors: Record<string, string> = {
-                  critical: 'bg-red-100 text-red-700',
-                  high: 'bg-orange-100 text-orange-700',
-                  medium: 'bg-slate-100 text-slate-700',
-                  low: 'bg-slate-100 text-slate-500',
+                  critical: 'bg-rose-100 text-rose-700 border-rose-200',
+                  high: 'bg-orange-100 text-orange-700 border-orange-200',
+                  medium: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+                  low: 'bg-slate-100 text-slate-600 border-slate-200',
                 }
                 return (
                   <div
                     key={item.id}
                     onClick={() => setSelectedHandoff(item)}
-                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
                       isSelected
-                        ? 'bg-indigo-50/80 border-indigo-200 shadow-sm'
-                        : 'bg-white border-slate-200/60 hover:border-slate-300'
+                        ? 'bg-indigo-50/90 border-indigo-400 shadow-xs ring-1 ring-indigo-400/30'
+                        : 'bg-white border-slate-200/80 hover:border-slate-300 hover:shadow-2xs'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${priorityColors[item.priority] || 'bg-slate-100 text-slate-700'}`}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${priorityColors[item.priority] || 'bg-slate-100 text-slate-700'}`}>
                         {item.priority}
                       </span>
-                      <span className="text-[10px] font-semibold text-slate-400">
-                        {item.wait_time_seconds ? `${Math.round(item.wait_time_seconds / 60)}m wait` : ''}
+                      <span className="text-[10px] font-bold text-slate-400">
+                        {item.wait_time_seconds ? `${Math.round(item.wait_time_seconds / 60)}m wait` : 'Live'}
                       </span>
                     </div>
-                    <p className="text-xs font-semibold text-slate-800 line-clamp-2">{item.reason}</p>
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <p className="text-xs font-bold text-slate-800 line-clamp-2 leading-snug">{item.reason}</p>
+                    <p className="text-[10px] text-slate-400 font-mono mt-1.5 flex items-center justify-between">
+                      <span>{new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded ${
+                        isWaiting ? 'text-amber-700 bg-amber-50' : 'text-emerald-700 bg-emerald-50'
+                      }`}>
+                        {item.status}
+                      </span>
                     </p>
-                    {item.status === 'waiting' && (
+                    {isWaiting && (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleClaim(item) }}
-                        className="mt-2 w-full rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold py-1.5 transition-all cursor-pointer"
+                        className="mt-2.5 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white text-xs font-bold py-2 shadow-xs transition-all cursor-pointer"
                       >
-                        Claim
+                        Claim &amp; Join Chat
                       </button>
                     )}
-                    {item.status === 'assigned' && item.assigned_agent_id === user?.id && (
+                    {isActive && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setSelectedHandoff(item) }}
-                        className="mt-2 w-full rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold py-1.5 transition-all cursor-pointer"
+                        className="mt-2.5 w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 shadow-xs transition-all cursor-pointer"
                       >
-                        Open Chat
+                        Open Active Chat
                       </button>
                     )}
                   </div>
@@ -440,154 +570,183 @@ export default function AgentPage() {
           </div>
         </div>
 
-        {/* CENTER: Chat / Conversation */}
-        <div className="lg:col-span-6 flex flex-col gap-4">
+        {/* CENTER: Main Chat Box (6.5 cols - Extra Large & High Visibility) */}
+        <div className={`lg:col-span-6 flex flex-col overflow-hidden h-full bg-white border border-slate-200/80 rounded-2xl shadow-xs ${
+          mobileTab === 'chat' ? 'flex' : 'hidden lg:flex'
+        }`}>
           {selectedHandoff ? (
-            <>
-              {/* Chat Header */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex items-center justify-between">
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              {/* Top Chat Header Bar */}
+              <div className="p-3.5 sm:px-5 sm:py-3 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white z-10">
                 <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${
-                    selectedHandoff.status === 'in_progress' ? 'bg-emerald-500 animate-pulse' :
-                    selectedHandoff.status === 'assigned' ? 'bg-blue-500 animate-pulse' :
+                  <div className={`w-3 h-3 rounded-full shrink-0 ${
+                    selectedHandoff.status === 'in_progress' ? 'bg-emerald-500 radar-live' :
+                    selectedHandoff.status === 'assigned' ? 'bg-indigo-500 animate-pulse' :
                     'bg-amber-500 animate-pulse'
                   }`} />
                   <div>
-                    <h2 className="text-sm font-extrabold text-slate-900">
-                      Conversation: {selectedHandoff.conversation_id.slice(0, 8)}...
+                    <h2 className="text-sm font-black text-slate-900 leading-tight">
+                      Session #{selectedHandoff.conversation_id.slice(0, 8)}
                     </h2>
-                    <p className="text-[10px] text-slate-400">
-                      Status: {selectedHandoff.status} • Priority: {selectedHandoff.priority}
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      Status: <span className="font-bold text-slate-700 uppercase">{selectedHandoff.status}</span> &bull; Priority: <span className="font-bold text-indigo-600 uppercase">{selectedHandoff.priority}</span>
                     </p>
                   </div>
                 </div>
+
                 <div className="flex items-center gap-2">
-                  {selectedHandoff.status === 'in_progress' && (
-                    <button
-                      onClick={handleResolve}
-                      className="rounded-xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2 text-xs font-bold text-white transition-all shadow-sm cursor-pointer"
-                    >
-                      ✓ Resolve
-                    </button>
-                  )}
+                  <button
+                    onClick={handleResolve}
+                    className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 px-4 py-1.5 text-xs font-bold text-white transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Resolve &amp; Free</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Customer Context Summary */}
+              {/* Compact AI Context Pill Bar */}
               {selectedHandoff.context && ((selectedHandoff.context as any).ai_summary || (selectedHandoff.context as any).sentiment) && (
-                <div className="bg-purple-50/50 border border-purple-100 rounded-2xl p-4 text-xs space-y-1">
-                  <span className="text-[10px] font-extrabold uppercase text-purple-600 tracking-wider">AI Context</span>
-                  {(selectedHandoff.context as any).ai_summary && (
-                    <p className="text-purple-900 font-medium leading-relaxed">
-                      <Markdown>{String((selectedHandoff.context as any).ai_summary)}</Markdown>
-                    </p>
-                  )}
-                  <div className="flex items-center gap-3 mt-1">
+                <div className="px-4 py-2 bg-gradient-to-r from-purple-50/80 via-indigo-50/50 to-purple-50/80 border-b border-purple-100 flex items-center justify-between text-xs shrink-0">
+                  <div className="flex items-center gap-2 truncate mr-3">
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-purple-200/80 text-purple-900 px-2 py-0.5 rounded-md shrink-0">AI Context</span>
+                    <span className="text-purple-950 font-medium truncate text-xs">
+                      {(selectedHandoff.context as any).ai_summary || selectedHandoff.reason}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
                     {(selectedHandoff.context as any).sentiment && (
-                      <span className="font-bold text-purple-700">
-                        Sentiment: {String((selectedHandoff.context as any).sentiment).toUpperCase()}
-                      </span>
-                    )}
-                    {(selectedHandoff.context as any).confidence_score != null && (
-                      <span className="font-bold text-purple-700">
-                        AI Confidence: {Math.round(Number((selectedHandoff.context as any).confidence_score) * 100)}%
+                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-white border border-purple-200 text-purple-800">
+                        {String((selectedHandoff.context as any).sentiment)}
                       </span>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Chat Messages */}
-              <div className="bg-white border border-slate-200/80 rounded-2xl flex-1 flex flex-col shadow-sm overflow-hidden min-h-[300px]">
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {chatMessages.map((msg) => {
+              {/* Chat Messages Stream (Expanded & Large) */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 bg-[#f8fafc]/50 min-h-0">
+                {chatMessages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400 text-xs">
+                    <p>No messages yet in this session.</p>
+                  </div>
+                ) : (
+                  chatMessages.map((msg) => {
                     const isAgent = msg.sender_type === 'human_agent'
                     const isCustomer = msg.sender_type === 'customer'
                     const isAI = msg.sender_type === 'ai'
                     return (
                       <div key={msg.id} className={`flex ${isCustomer ? 'justify-start' : 'justify-end'}`}>
-                        <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-xs sm:text-sm font-medium ${
+                        <div className={`max-w-[78%] rounded-2xl px-4 py-3 text-xs sm:text-sm font-medium shadow-2xs leading-relaxed ${
                           isCustomer
-                            ? 'bg-slate-100 text-slate-800 rounded-bl-none'
+                            ? 'bg-white border border-slate-200/80 text-slate-900 rounded-bl-none'
                             : isAgent
-                              ? 'bg-emerald-500 text-white rounded-br-none'
-                              : 'bg-indigo-100 text-indigo-900 rounded-br-none italic'
+                              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-br-none'
+                              : 'bg-indigo-50 border border-indigo-100 text-indigo-950 rounded-br-none'
                         }`}>
-                          {isAgent && msg.agent_name && (
-                            <span className="text-[10px] font-bold block mb-1 opacity-80">{msg.agent_name}</span>
+                          {isAgent && (
+                            <span className="text-[10px] font-extrabold block mb-1 text-emerald-100 uppercase tracking-wide">
+                              {msg.agent_name || 'Support Specialist (You)'}
+                            </span>
                           )}
-                          {isAI && <span className="text-[10px] font-bold block mb-1 opacity-60">AI Assistant</span>}
-                          <div className={isAI ? 'markdown-content [&_p]:my-0.5 [&_strong]:font-bold [&_ul]:my-0.5 [&_ol]:my-0.5 [&_li]:my-0' : ''}>
+                          {isCustomer && (
+                            <span className="text-[10px] font-extrabold block mb-1 text-slate-400 uppercase tracking-wide">Customer</span>
+                          )}
+                          {isAI && (
+                            <span className="text-[10px] font-extrabold block mb-1 text-indigo-600 uppercase tracking-wide">AI Copilot</span>
+                          )}
+                          <div className={isAI ? 'markdown-content [&_p]:my-0.5 [&_strong]:font-bold' : 'whitespace-pre-wrap'}>
                             {isAI ? <Markdown>{msg.content}</Markdown> : msg.content}
                           </div>
-                          <span className="text-[9px] opacity-50 mt-1 block">{formatTime(msg.timestamp)}</span>
+                          <span className={`text-[10px] mt-1.5 block text-right ${isAgent ? 'text-emerald-200' : 'text-slate-400'}`}>
+                            {formatTime(msg.timestamp)}
+                          </span>
                         </div>
                       </div>
                     )
-                  })}
-                  {isCustomerTyping && (
-                    <div className="flex justify-start">
-                      <div className="bg-slate-100 rounded-2xl rounded-bl-none px-4 py-2">
-                        <span className="text-xs text-slate-500">Customer is typing...</span>
-                      </div>
-                    </div>
-                  )}
-                  <div ref={chatEndRef} />
-                </div>
-
-                {/* AI Copilot Suggestions */}
-                {suggestedReplies.length > 0 && (
-                  <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/50">
-                    <span className="text-[10px] font-extrabold text-indigo-600 uppercase tracking-wider">
-                      💡 AI Suggested Replies
-                    </span>
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {suggestedReplies.map((reply, i) => (
-                        <button
-                          key={i}
-                          onClick={() => setReplyText(reply)}
-                          className="text-left text-[11px] px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-950 transition-colors border border-indigo-100 font-medium"
-                        >
-                          {reply.slice(0, 80)}{reply.length > 80 ? '...' : ''}
-                        </button>
-                      ))}
+                  })
+                )}
+                {isCustomerTyping && (
+                  <div className="flex justify-start">
+                    <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none px-4 py-2 shadow-2xs">
+                      <span className="text-xs text-slate-500 font-medium animate-pulse">Customer is typing a reply...</span>
                     </div>
                   </div>
                 )}
+                <div ref={chatEndRef} />
+              </div>
 
-                {/* Reply Input */}
-                <div className="p-3 border-t border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <textarea
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendReply() } }}
-                      placeholder="Type your response to the customer..."
-                      rows={1}
-                      className="flex-1 resize-none rounded-xl bg-slate-50 border border-slate-200 px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
-                    />
-                    <button
-                      onClick={handleSendReply}
-                      disabled={!replyText.trim()}
-                      className="rounded-xl bg-indigo-600 hover:bg-indigo-700 px-5 py-2.5 text-xs font-bold text-white shadow-md disabled:opacity-40 transition-all cursor-pointer"
-                    >
-                      Send →
-                    </button>
+              {/* Bottom Sticky Section: Compact AI Quick Suggestions + Reply Bar */}
+              <div className="border-t border-slate-200/80 bg-white p-3 shrink-0 space-y-2">
+                {suggestedReplies.length > 0 && (
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                    <span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                      <span>✨ Quick:</span>
+                    </span>
+                    {suggestedReplies.map((reply, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setReplyText(reply)}
+                        className="shrink-0 text-left text-xs px-3 py-1.5 rounded-xl bg-indigo-50/80 hover:bg-indigo-100 text-indigo-900 border border-indigo-100 font-semibold transition-colors cursor-pointer truncate max-w-xs"
+                        title={reply}
+                      >
+                        {reply}
+                      </button>
+                    ))}
                   </div>
+                )}
+
+                {/* Reply Input Bar */}
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200/90 rounded-2xl p-1.5 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+                  <textarea
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSendReply()
+                      }
+                    }}
+                    placeholder="Type your response to the customer... (Enter to send, Shift+Enter for newline)"
+                    rows={1}
+                    className="flex-1 resize-none bg-transparent px-3 py-1.5 text-xs sm:text-sm font-medium text-slate-800 focus:outline-none placeholder:text-slate-400"
+                    style={{ minHeight: '38px', maxHeight: '100px' }}
+                  />
+                  <button
+                    onClick={handleSendReply}
+                    disabled={!replyText.trim()}
+                    className="rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 px-4 py-2 text-xs font-bold text-white shadow-md shadow-indigo-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                  >
+                    <span>Send</span>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                  </button>
                 </div>
               </div>
-            </>
+            </div>
           ) : (
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-12 text-center text-slate-400 shadow-sm flex-1 flex flex-col items-center justify-center">
-              <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center text-3xl mb-4">💬</div>
-              <p className="text-sm font-semibold">Select a conversation from the queue</p>
-              <p className="text-xs text-slate-400 mt-1">to view customer details and start chatting</p>
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/50">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-3">
+                <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
+              <h3 className="font-display text-sm font-bold text-slate-800">No Escalation Selected</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                Select an escalation from the left queue to open live conversation, view AI sentiment, and chat with the customer.
+              </p>
             </div>
           )}
         </div>
 
-        {/* RIGHT: Internal Notes + Agent Presence */}
-        <div className="lg:col-span-3 space-y-4">
+        {/* RIGHT: Internal Notes & Team Status (3 cols) */}
+        <div className={`lg:col-span-3 flex flex-col gap-4 overflow-y-auto h-full ${
+          mobileTab === 'notes' ? 'flex' : 'hidden lg:flex'
+        }`}>
           {/* Internal Notes Panel */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
             <div className="p-4 border-b border-slate-100">

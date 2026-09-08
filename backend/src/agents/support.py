@@ -29,6 +29,14 @@ async def support_agent(state: AgentState) -> AgentState:
     try:
         logger.info(f"Support Agent processing conversation {state['conversation_id']}")
 
+        # Fast-path for escalation requests: don't waste time running heavy LLM generation
+        if state.get('intent') in ('escalation_request', 'escalation'):
+            logger.info("Fast-path: support agent creating initial transfer message for escalation")
+            state['ai_response'] = "I am transferring your request to our live human support team."
+            state['confidence_score'] = 1.0
+            state['step_count'] = state.get('step_count', 0) + 1
+            return state
+
         # Initialize Groq LLM
         llm = ChatGroq(
             api_key=settings.groq_api_key,
@@ -114,9 +122,14 @@ Recent conversation history (oldest first) - use it for context and continuity:
             HumanMessage(content=state['user_message'])
         ]
 
-        # Generate response
-        response = await llm.ainvoke(messages)
-        ai_response = response.content.strip()
+        # Generate response with timeout
+        import asyncio
+        try:
+            response = await asyncio.wait_for(llm.ainvoke(messages), timeout=7.0)
+            ai_response = response.content.strip()
+        except asyncio.TimeoutError:
+            logger.warning("Support LLM timed out; using fallback response")
+            ai_response = "I am processing your inquiry. If you'd like immediate assistance from our team, feel free to use the 'Talk to Human' option or ask me any questions."
 
         # Calculate confidence score
         confidence_score = 0.88
@@ -127,7 +140,6 @@ Recent conversation history (oldest first) - use it for context and continuity:
         elif state.get('intent') in ('greeting', 'faq', 'account_help'):
             confidence_score = 0.95
         elif state.get('intent') == 'escalation_request':
-            # Medium confidence for escalation requests
             confidence_score = 0.8
 
         logger.info(

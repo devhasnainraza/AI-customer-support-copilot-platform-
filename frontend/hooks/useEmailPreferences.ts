@@ -1,37 +1,31 @@
 "use client"
 
 import { useState, useEffect, useCallback } from 'react'
+import { getAuthHeaders } from '@/lib/api'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export interface EmailPreference {
-  id: string | null
-  user_id: string
+  id?: string
   category: string
   category_name?: string
+  label?: string
   description?: string
-  icon?: string
   enabled: boolean
-  email: string
+  email?: string
   is_default?: boolean
 }
 
-interface UseEmailPreferencesReturn {
+export interface UseEmailPreferencesReturn {
   preferences: EmailPreference[]
   isLoading: boolean
   error: string | null
   fetchPreferences: () => Promise<void>
-  updatePreference: (category: string, enabled: boolean, email?: string) => Promise<boolean>
-  bulkUpdate: (updates: Record<string, boolean>, email?: string) => Promise<boolean>
+  updatePreference: (category: string, enabled: boolean) => Promise<boolean>
+  bulkUpdate: (updates: Record<string, boolean>) => Promise<boolean>
   togglePreference: (category: string) => Promise<boolean>
   getEnabledCount: () => number
   getDisabledCount: () => number
-}
-
-function getAuthHeaders() {
-  const raw = localStorage.getItem('supabase.auth.token') || ''
-  const token = raw.replace(/^"|"$/g, '')
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
 }
 
 export function useEmailPreferences(userId: string, role: string = 'customer', email: string = ''): UseEmailPreferencesReturn {
@@ -48,9 +42,10 @@ export function useEmailPreferences(userId: string, role: string = 'customer', e
     setIsLoading(true)
     setError(null)
     try {
+      const headers = await getAuthHeaders()
       const params = new URLSearchParams({ role, email })
       const res = await fetch(`${API}/v1/notifications/email/preferences/${userId}?${params}`, {
-        headers: getAuthHeaders(),
+        headers,
       })
       if (!res.ok) throw new Error('Failed to fetch preferences')
       const data = await res.json()
@@ -70,11 +65,12 @@ export function useEmailPreferences(userId: string, role: string = 'customer', e
     if (!userId) return false
 
     try {
+      const headers = await getAuthHeaders()
       const params = new URLSearchParams({ category })
       const body = JSON.stringify({ enabled, email: newEmail || email })
       const res = await fetch(`${API}/v1/notifications/email/preferences/${userId}?${params}`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers,
         body,
       })
       if (!res.ok) throw new Error('Failed to update preference')
@@ -97,9 +93,10 @@ export function useEmailPreferences(userId: string, role: string = 'customer', e
     if (!userId) return false
 
     try {
+      const headers = await getAuthHeaders()
       const res = await fetch(`${API}/v1/notifications/email/preferences/${userId}`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers,
         body: JSON.stringify({ preferences: updates, email: newEmail || email }),
       })
       if (!res.ok) throw new Error('Failed to bulk update preferences')

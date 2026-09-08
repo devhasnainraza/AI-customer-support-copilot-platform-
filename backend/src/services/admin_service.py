@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 
 
 class AdminAgent:
-    def __init__(self, agent_id: str, email: str, name: str, role: str = "agent"):
+    def __init__(self, agent_id: str, email: str, name: str, role: str = "agent", status: str = "active"):
         self.id = agent_id
         self.email = email
         self.name = name
         self.role = role  # agent, manager
-        self.status = "inactive"  # active, inactive, suspended
+        self.status = status  # active, inactive, suspended
         self.permissions: List[str] = []
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.updated_at = self.created_at
@@ -141,6 +141,15 @@ class AdminService:
             if not agent:
                 return False
             agent.status = "inactive"
+            agent.updated_at = datetime.now(timezone.utc).isoformat()
+            return True
+
+    async def activate_agent(self, agent_id: str) -> bool:
+        async with self._lock:
+            agent = self._agents.get(agent_id)
+            if not agent:
+                return False
+            agent.status = "active"
             agent.updated_at = datetime.now(timezone.utc).isoformat()
             return True
 

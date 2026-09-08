@@ -34,7 +34,7 @@ export function TicketList({ tickets, onSelectTicket }: TicketListProps) {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-xs sm:text-sm">
+          <table className="w-full min-w-[640px] border-collapse text-left text-xs sm:text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/50 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest">
                 <th className="px-6 py-4">Ticket ID</th>
@@ -62,8 +62,8 @@ export function TicketList({ tickets, onSelectTicket }: TicketListProps) {
                   <td className="px-6 py-4.5">
                     <TicketStatusPill status={ticket.status} />
                   </td>
-                  <td className="px-6 py-4.5 text-slate-400 font-medium">
-                    {new Date(ticket.created_at).toLocaleDateString(undefined, {
+                  <td suppressHydrationWarning className="px-6 py-4.5 text-slate-400 font-medium">
+                    {new Date(ticket.created_at).toLocaleDateString('en-US', {
                       year: 'numeric',
                       month: 'short',
                       day: 'numeric'

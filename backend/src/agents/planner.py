@@ -31,6 +31,31 @@ async def planner_agent(state: AgentState) -> AgentState:
     try:
         logger.info(f"Planner Agent processing conversation {state['conversation_id']}")
 
+        user_msg = (state.get('user_message') or '').strip().lower()
+
+        # Fast-path for explicit human escalation requests
+        escalation_keywords = [
+            "talk to a human", "speak to a human", "human agent", "human support",
+            "real person", "human specialist", "talk to agent", "representative",
+            "customer support agent", "speak with someone", "live person", "support specialist",
+            "talk to human", "speak to human", "human assistant", "live agent"
+        ]
+        if any(kw in user_msg for kw in escalation_keywords):
+            logger.info("Fast-path: classified intent as 'escalation_request'")
+            state['intent'] = 'escalation_request'
+            state['requires_retrieval'] = False
+            state['step_count'] = state.get('step_count', 0) + 1
+            return state
+
+        # Fast-path for simple greetings
+        greeting_words = {"hi", "hello", "hey", "good morning", "good afternoon", "good evening", "howdy", "hola"}
+        if user_msg in greeting_words or user_msg.rstrip("!.,") in greeting_words:
+            logger.info("Fast-path: classified intent as 'greeting'")
+            state['intent'] = 'greeting'
+            state['requires_retrieval'] = False
+            state['step_count'] = state.get('step_count', 0) + 1
+            return state
+
         # Initialize Groq LLM
         llm = ChatGroq(
             api_key=settings.groq_api_key,
@@ -56,9 +81,14 @@ Respond with ONLY the intent keyword, nothing else."""
             HumanMessage(content=f"User message: {state['user_message']}")
         ]
 
-        # Get intent classification
-        response = await llm.ainvoke(messages)
-        intent = response.content.strip().lower()
+        # Get intent classification with timeout
+        import asyncio
+        try:
+            response = await asyncio.wait_for(llm.ainvoke(messages), timeout=4.0)
+            intent = response.content.strip().lower()
+        except asyncio.TimeoutError:
+            logger.warning("Planner LLM timed out; defaulting intent to 'question'")
+            intent = 'question'
 
         # Validate intent
         valid_intents = ['question', 'greeting', 'escalation_request', 'feedback', 'other']

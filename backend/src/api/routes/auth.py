@@ -33,16 +33,18 @@ class AdminSignUpRequest(BaseModel):
     email: EmailStr
     password: str
     full_name: str = "User"
+    role: str = "customer"  # customer | agent | manager | admin
 
 
 @router.post("/admin-signup")
-@rate_limit(max_requests=5, window_seconds=300)
+@rate_limit(max_requests=10, window_seconds=300)
 async def admin_signup(request: Request, req: AdminSignUpRequest):
     """
     Auto-confirm user signup using Supabase Service Role.
-    Bypasses SMTP email rate limits.
+    Saves user role (customer, agent, manager, admin) and syncs role tables.
     """
     supabase = get_service_client()
+    user_role = req.role if req.role in ("customer", "agent", "manager", "admin") else "customer"
     try:
         # Check existing user
         users_resp = supabase.auth.admin.list_users()
@@ -60,8 +62,11 @@ async def admin_signup(request: Request, req: AdminSignUpRequest):
                     "email_confirm": True,
                     "user_metadata": {
                         "full_name": req.full_name,
-                        "role": "customer",
+                        "role": user_role,
                         "email_verified": True
+                    },
+                    "app_metadata": {
+                        "role": user_role
                     }
                 }
             )
@@ -73,32 +78,128 @@ async def admin_signup(request: Request, req: AdminSignUpRequest):
                 "email_confirm": True,
                 "user_metadata": {
                     "full_name": req.full_name,
-                    "role": "customer",
+                    "role": user_role,
                     "email_verified": True
+                },
+                "app_metadata": {
+                    "role": user_role
                 }
             })
             user_id = res.user.id
 
-        # Sync customer DB
-        cust_res = supabase.table("customers").select("*").eq("auth_id", user_id).execute()
-        if not cust_res.data:
-            supabase.table("customers").insert({
-                "auth_id": user_id,
-                "email": req.email,
-                "name": req.full_name,
-                "role": "customer",
-                "tenant_id": "00000000-0000-0000-0000-000000000000"
-            }).execute()
-        else:
-            supabase.table("customers").update({
-                "email": req.email,
-                "name": req.full_name,
-                "role": "customer"
-            }).eq("auth_id", user_id).execute()
+        # Sync DB tables based on role
+        if user_role in ("agent", "manager", "admin"):
+            try:
+                agent_res = supabase.table("agents").select("*").eq("auth_id", user_id).execute()
+                if not agent_res.data:
+                    supabase.table("agents").insert({
+                        "auth_id": user_id,
+                        "email": req.email,
+                        "name": req.full_name,
+                        "role": user_role,
+                        "status": "active"
+                    }).execute()
+                else:
+                    supabase.table("agents").update({
+                        "email": req.email,
+                        "name": req.full_name,
+                        "role": user_role,
+                        "status": "active"
+                    }).eq("auth_id", user_id).execute()
+            except Exception as e:
+                logger.warning(f"Could not sync agents table: {e}")
 
-        return {"message": "Account created and auto-confirmed successfully!", "user_id": user_id}
+        # Always sync customers table as well
+        try:
+            cust_res = supabase.table("customers").select("*").eq("auth_id", user_id).execute()
+            if not cust_res.data:
+                supabase.table("customers").insert({
+                    "auth_id": user_id,
+                    "email": req.email,
+                    "name": req.full_name,
+                    "role": user_role,
+                    "tenant_id": "00000000-0000-0000-0000-000000000000"
+                }).execute()
+            else:
+                supabase.table("customers").update({
+                    "email": req.email,
+                    "name": req.full_name,
+                    "role": user_role
+                }).eq("auth_id", user_id).execute()
+        except Exception as e:
+            logger.warning(f"Could not sync customers table: {e}")
+
+        return {
+            "message": f"Account provisioned successfully with role: {user_role}",
+            "user_id": user_id,
+            "role": user_role
+        }
     except Exception as e:
         logger.error(f"Admin signup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SetRoleRequest(BaseModel):
+    email: EmailStr
+    role: str  # customer | agent | manager | admin
+
+
+@router.post("/set-role")
+async def set_user_role(req: SetRoleRequest):
+    """
+    Explicitly update user's role in app_metadata, user_metadata, and staff tables.
+    """
+    supabase = get_service_client()
+    user_role = req.role if req.role in ("customer", "agent", "manager", "admin") else "customer"
+    try:
+        users_resp = supabase.auth.admin.list_users()
+        target_user = None
+        for u in users_resp:
+            if u.email.lower() == req.email.lower():
+                target_user = u
+                break
+
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        current_user_metadata = target_user.user_metadata or {}
+        current_user_metadata["role"] = user_role
+
+        supabase.auth.admin.update_user_by_id(
+            target_user.id,
+            {
+                "user_metadata": current_user_metadata,
+                "app_metadata": {
+                    "role": user_role
+                }
+            }
+        )
+
+        # Sync agents table if staff role
+        if user_role in ("agent", "manager", "admin"):
+            try:
+                agent_res = supabase.table("agents").select("*").eq("auth_id", target_user.id).execute()
+                if not agent_res.data:
+                    supabase.table("agents").insert({
+                        "auth_id": target_user.id,
+                        "email": req.email,
+                        "name": current_user_metadata.get("full_name", req.email),
+                        "role": user_role,
+                        "status": "active"
+                    }).execute()
+                else:
+                    supabase.table("agents").update({
+                        "role": user_role,
+                        "status": "active"
+                    }).eq("auth_id", target_user.id).execute()
+            except Exception as e:
+                logger.warning(f"Could not sync agents table in set-role: {e}")
+
+        return {"message": f"Role updated to {user_role}", "role": user_role, "user_id": target_user.id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Set role failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -168,7 +269,7 @@ def _build_reset_email_html(reset_url: str) -> str:
 
 
 async def _send_smtp_email(to_email: str, subject: str, html_body: str) -> None:
-    """Send email via configured SMTP (Resend)."""
+    """Send email via configured SMTP (Gmail, Resend, etc.)."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"Copilot Portal <{settings.email_from}>"
@@ -182,11 +283,24 @@ async def _send_smtp_email(to_email: str, subject: str, html_body: str) -> None:
     loop = asyncio.get_running_loop()
 
     def _send():
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
-            if settings.smtp_password:
-                server.starttls()
-                server.login(settings.smtp_username, settings.smtp_password)
-            server.send_message(msg)
+        timeout = 15
+        port = int(settings.smtp_port) if settings.smtp_port else 587
+        if port == 465:
+            with smtplib.SMTP_SSL(settings.smtp_host, port, timeout=timeout) as server:
+                if settings.smtp_username and settings.smtp_password:
+                    server.login(settings.smtp_username, settings.smtp_password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(settings.smtp_host, port, timeout=timeout) as server:
+                server.ehlo()
+                try:
+                    server.starttls()
+                    server.ehlo()
+                except Exception:
+                    pass  # In case server does not support STARTTLS
+                if settings.smtp_username and settings.smtp_password:
+                    server.login(settings.smtp_username, settings.smtp_password)
+                server.send_message(msg)
 
     await loop.run_in_executor(None, _send)
 
@@ -202,8 +316,10 @@ async def request_password_reset(request: Request, body: PasswordResetRequest):
     Strategy (fallback chain):
     1. Generate a recovery link via Supabase Admin API.
     2. Try sending it through the configured SMTP provider (Resend).
-    3. If SMTP fails (e.g. unverified sender domain), fall back to
+    3. If SMTP fails (e.g. unverified sender domain in sandbox), fall back to
        Supabase's built-in password reset email which uses their own SMTP.
+    4. In development mode, if both fail, return the action link directly
+       so the developer can still test the password reset flow.
     """
     email = body.email.lower().strip()
 
@@ -259,11 +375,14 @@ async def request_password_reset(request: Request, body: PasswordResetRequest):
                 logger.info(f"Password reset email sent to {email} via SMTP")
             except Exception as e:
                 logger.warning(
-                    f"SMTP send failed for {email} (will fall back to Supabase): {e}"
+                    f"SMTP send failed for {email} (will try Supabase fallback): {e}"
                 )
 
         # ── Step 3: Fallback to Supabase built-in email ────────────────
-        if not smtp_sent:
+        if not smtp_sent and not action_link:
+            # Only attempt Supabase built-in if we don't already have an
+            # action_link (generate_link already touched the recovery token,
+            # so calling reset_password_for_email immediately would 429).
             try:
                 supabase.auth.reset_password_for_email(
                     email,
@@ -276,9 +395,23 @@ async def request_password_reset(request: Request, body: PasswordResetRequest):
                     exc_info=True,
                 )
 
+        # ── Step 4: Dev-mode direct link delivery ──────────────────────
+        # In development, if SMTP failed but we have the action_link from
+        # generate_link, include the link in the response so developers
+        # can still test the reset flow without a verified email domain.
+        if not smtp_sent and action_link and settings.environment == "development":
+            logger.info(
+                f"Dev mode: returning password reset link directly for {email}"
+            )
+            return PasswordResetResponse(
+                message=f"Development mode: SMTP not available for this recipient. "
+                        f"Use this link to reset your password: {action_link}"
+            )
+
         return PasswordResetResponse(message=success_msg)
 
     except Exception as e:
         logger.error(f"Password reset error for {email}: {e}", exc_info=True)
         # Still return success to prevent enumeration
         return PasswordResetResponse(message=success_msg)
+

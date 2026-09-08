@@ -1,5 +1,5 @@
 """Notification API Routes - In-App, Push, Email"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 import logging
@@ -7,6 +7,7 @@ import logging
 from src.services.notification_service import notification_service
 from src.services.email_service import email_service
 from src.services.email_preference_service import email_preference_service
+from src.services.whatsapp_service import whatsapp_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/notifications", tags=["notifications"])
@@ -53,29 +54,59 @@ class SystemAlertEmailRequest(BaseModel):
     message: str
     severity: Optional[str] = "warning"
 
+from src.api.middleware.auth import get_optional_user
+
 # User Notifications
 @router.get("/user/{user_id}")
-async def get_user_notifications(user_id: str, unread_only: bool = False, limit: int = 50):
+async def get_user_notifications(
+    user_id: str,
+    unread_only: bool = False,
+    limit: int = 50,
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
+    user_role = current_user.get("role", "customer") if current_user else "customer"
+    if current_user and current_user.get("user_id") and str(current_user["user_id"]) != str(user_id) and user_role != "admin":
+        user_id = str(current_user["user_id"])
+
     notifications = await notification_service.get_user_notifications(
-        user_id, unread_only=unread_only, limit=limit
+        user_id, unread_only=unread_only, limit=limit, user_role=user_role
     )
     return {"notifications": notifications, "total": len(notifications)}
 
 @router.get("/user/{user_id}/unread-count")
-async def get_unread_count(user_id: str):
-    count = await notification_service.get_unread_count(user_id)
+async def get_unread_count(
+    user_id: str,
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
+    user_role = current_user.get("role", "customer") if current_user else "customer"
+    if current_user and current_user.get("user_id") and str(current_user["user_id"]) != str(user_id) and user_role != "admin":
+        user_id = str(current_user["user_id"])
+
+    count = await notification_service.get_unread_count(user_id, user_role=user_role)
     return {"count": count}
 
 @router.post("/user/{user_id}/mark-read/{notification_id}")
-async def mark_read(user_id: str, notification_id: str):
+async def mark_read(
+    user_id: str,
+    notification_id: str,
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
+    if current_user and current_user.get("user_id") and str(current_user["user_id"]) != str(user_id):
+        user_id = str(current_user["user_id"])
     success = await notification_service.mark_read(notification_id, user_id)
     if not success:
         raise HTTPException(status_code=404, detail="Notification not found")
     return {"status": "read"}
 
 @router.post("/user/{user_id}/mark-all-read")
-async def mark_all_read(user_id: str):
-    count = await notification_service.mark_all_read(user_id)
+async def mark_all_read(
+    user_id: str,
+    current_user: Optional[dict] = Depends(get_optional_user)
+):
+    user_role = current_user.get("role", "customer") if current_user else "customer"
+    if current_user and current_user.get("user_id") and str(current_user["user_id"]) != str(user_id):
+        user_id = str(current_user["user_id"])
+    count = await notification_service.mark_all_read(user_id, user_role=user_role)
     return {"marked": count}
 
 # Push Notifications
@@ -213,6 +244,15 @@ async def send_test_email(payload: SendEmailRequest):
     )
     return record.to_dict()
 
+@router.get("/email/preview/{record_id}")
+async def preview_email_html(record_id: str):
+    """Render the full HTML template of an email record for preview."""
+    from fastapi.responses import HTMLResponse
+    html = email_service.get_record_html(record_id)
+    if not html:
+        raise HTTPException(status_code=404, detail="Email record not found or no HTML preview available")
+    return HTMLResponse(content=html)
+
 # ── Email Notification Preferences ──────────────────────────────────────
 
 class UpdatePreferenceRequest(BaseModel):
@@ -269,3 +309,111 @@ async def bulk_update_role_preferences(payload: RoleBulkUpdateRequest):
         payload.role, "all", payload.enabled
     )
     return {"updated": count}
+
+
+# ── WhatsApp Notification Endpoints ─────────────────────────────────────
+
+class SendWhatsAppNotificationRequest(BaseModel):
+    to_phone: Optional[str] = None
+    title: str = "Enterprise Support Alert"
+    message: str = "This is a verified alert notification from AI Support Copilot."
+    priority: str = "medium"
+    data: Optional[dict] = None
+
+class UpdateWhatsAppNotificationConfigRequest(BaseModel):
+    notification_phone: str
+
+class MultiChannelTestRequest(BaseModel):
+    title: str = "🚨 Escalation & Support Test Alert"
+    message: str = "Testing multi-channel notification delivery across WhatsApp and Email."
+    priority: str = "high"
+    to_email: Optional[str] = None
+    to_phone: Optional[str] = None
+
+@router.get("/whatsapp/config")
+async def get_whatsapp_notification_config():
+    """Get WhatsApp notification destination configuration and status."""
+    return whatsapp_service.get_status()
+
+@router.post("/whatsapp/config")
+async def update_whatsapp_notification_config(payload: UpdateWhatsAppNotificationConfigRequest):
+    """Update WhatsApp notification destination phone number."""
+    phone = await whatsapp_service.update_notification_phone(payload.notification_phone)
+    return {"status": "updated", "notification_phone": phone}
+
+@router.get("/whatsapp/history")
+async def get_whatsapp_notification_history(limit: int = 50):
+    """Get list of dispatched WhatsApp notifications."""
+    return {"history": whatsapp_service.get_notification_history(limit)}
+
+@router.post("/whatsapp/test")
+async def send_test_whatsapp_notification(payload: SendWhatsAppNotificationRequest):
+    """Dispatch a test WhatsApp notification."""
+    record = await whatsapp_service.send_notification(
+        to_phone=payload.to_phone or "",
+        title=payload.title,
+        message=payload.message,
+        priority=payload.priority,
+        data=payload.data or {},
+    )
+    return {"status": "sent", "record": record}
+
+@router.post("/test-multi-channel")
+async def send_multi_channel_test_notification(payload: MultiChannelTestRequest):
+    """Send a simultaneous test notification to both WhatsApp and Email."""
+    from src.config.settings import settings
+    from src.services.email_service import EmailTemplate
+
+    results = {}
+
+    # 1. Dispatch Email
+    target_email = payload.to_email or settings.admin_notification_email or "developerhasnainraza@gmail.com"
+    try:
+        subject, html = EmailTemplate.custom(
+            to=target_email,
+            subject_text=f"[{payload.priority.upper()}] {payload.title}",
+            heading=payload.title,
+            body_html=f"<p style='font-size:14px;color:#0f172a;line-height:1.6;'>{payload.message}</p>"
+                      f"<p style='margin-top:16px;font-size:12px;color:#64748b;'>"
+                      f"<strong>Priority:</strong> <span style='color:#4f46e5;'>{payload.priority.upper()}</span> &bull; "
+                      f"<strong>Channel:</strong> Multi-Channel Verification</p>",
+            accent="#4f46e5" if payload.priority != "critical" else "#ef4444",
+        )
+        email_record = await email_service.send_email(
+            to=target_email, subject=subject, html=html, template="system_alert"
+        )
+        results["email"] = {
+            "status": email_record.status,
+            "to": target_email,
+            "mode": email_record.mode,
+            "id": email_record.id,
+            "error": email_record.error,
+        }
+    except Exception as e:
+        results["email"] = {"status": "failed", "error": str(e)}
+
+    # 2. Dispatch WhatsApp
+    target_phone = payload.to_phone or whatsapp_service.notification_phone or "+18005550199"
+    try:
+        wa_record = await whatsapp_service.send_notification(
+            to_phone=target_phone,
+            title=payload.title,
+            message=payload.message,
+            priority=payload.priority,
+            data={"test": True},
+        )
+        results["whatsapp"] = {
+            "status": wa_record.get("status", "sent"),
+            "to": target_phone,
+            "mode": wa_record.get("mode", "simulated"),
+            "id": wa_record.get("id"),
+        }
+    except Exception as e:
+        results["whatsapp"] = {"status": "failed", "error": str(e)}
+
+    return {
+        "status": "completed",
+        "title": payload.title,
+        "results": results,
+    }
+

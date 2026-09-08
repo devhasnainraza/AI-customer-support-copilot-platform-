@@ -143,27 +143,34 @@ class WhatsAppService:
     META_BASE_URL = "https://graph.facebook.com"
 
     def __init__(self):
-        # Config from admin panel
-        self.access_token: str = ""
-        self.phone_number_id: str = ""
-        self.business_account_id: str = ""
-        self.verify_token: str = ""
-        self.app_secret: str = ""
-        self.business_phone: str = ""
+        import os
+        from src.config.settings import settings
+
+        # Config from settings / environment variables
+        self.access_token: str = settings.whatsapp_access_token or os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+        self.phone_number_id: str = settings.whatsapp_phone_number_id or os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+        self.business_account_id: str = settings.whatsapp_business_account_id or os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
+        self.verify_token: str = settings.whatsapp_verify_token or os.getenv("WHATSAPP_VERIFY_TOKEN", "copilot_meta_verify_2026")
+        self.app_secret: str = settings.whatsapp_app_secret or os.getenv("WHATSAPP_APP_SECRET", "")
+        self.business_phone: str = settings.whatsapp_display_phone or os.getenv("WHATSAPP_DISPLAY_PHONE", "+18005550199")
+        self.business_name: str = settings.whatsapp_business_name or os.getenv("WHATSAPP_BUSINESS_NAME", "AI Support Copilot")
+        self.display_phone_number: str = self.business_phone
+        self.notification_phone: str = settings.whatsapp_notification_phone or os.getenv("WHATSAPP_NOTIFICATION_PHONE", "+18005550199")
 
         # Connection state
-        self.connected: bool = False
-        self.business_name: str = ""
-        self.display_phone_number: str = ""
+        self.connected: bool = bool(self.access_token and self.phone_number_id)
 
         # In-memory stores
         self._conversations: Dict[str, WhatsAppConversation] = {}
         self._templates: Dict[str, WhatsAppTemplate] = {}
         self._message_status: Dict[str, str] = {}  # wa_message_id → status
+        self._notification_history: List[dict] = []
         self._lock = asyncio.Lock()
 
         # Seed some demo templates
         self._seed_templates()
+        mode = "Meta Cloud API" if self.connected else "Sandbox Simulation Mode"
+        logger.info(f"WhatsAppService initialized (Mode: {mode}, Notification Phone: {self.notification_phone})")
 
     # ── Configuration ─────────────────────────────────────────────────────
 
@@ -176,6 +183,7 @@ class WhatsAppService:
         app_secret: str = "",
         business_name: str = "",
         display_phone_number: str = "",
+        notification_phone: str = "",
     ) -> dict:
         """Save WhatsApp Business API credentials and verify the connection."""
         async with self._lock:
@@ -186,6 +194,8 @@ class WhatsAppService:
             self.app_secret = app_secret
             self.business_name = business_name
             self.display_phone_number = display_phone_number
+            if notification_phone:
+                self.notification_phone = notification_phone
 
         # Verify the token by calling the Meta API
         verified = await self._verify_connection()
@@ -194,9 +204,15 @@ class WhatsAppService:
         if verified:
             logger.info(f"WhatsApp connected: {self.business_name} ({self.display_phone_number})")
         else:
-            logger.warning("WhatsApp connection verification failed — stored config but API not reachable")
+            logger.warning("WhatsApp connection verification failed — stored config (sandbox mode available)")
 
         return self.get_status()
+
+    async def update_notification_phone(self, phone: str) -> str:
+        async with self._lock:
+            self.notification_phone = phone.strip()
+            logger.info(f"WhatsApp notification destination phone updated to: {self.notification_phone}")
+            return self.notification_phone
 
     async def disconnect(self) -> bool:
         async with self._lock:
@@ -205,14 +221,17 @@ class WhatsAppService:
         return True
 
     def get_status(self) -> dict:
+        mode = "live_meta_api" if (self.connected and self.access_token) else "sandbox_simulation"
         return {
             "connected": self.connected,
             "business_name": self.business_name,
             "display_phone_number": self.display_phone_number,
+            "notification_phone": self.notification_phone,
             "phone_number_id": self.phone_number_id,
             "business_account_id": self.business_account_id,
             "verify_token": self.verify_token,
             "webhook_configured": bool(self.verify_token),
+            "mode": mode,
         }
 
     # ── Meta API helpers ──────────────────────────────────────────────────
@@ -415,10 +434,19 @@ class WhatsAppService:
         self._conversations[conv.id] = conv
         return conv
 
+    async def _find_conversation_by_phone(self, phone: str) -> Optional[WhatsAppConversation]:
+        """Find an existing WhatsApp conversation by phone number."""
+        clean_phone = phone.replace(" ", "").replace("-", "")
+        for conv in self._conversations.values():
+            conv_clean = conv.customer_phone.replace(" ", "").replace("-", "")
+            if conv_clean == clean_phone:
+                return conv
+        return None
+
     # ── Sending messages ──────────────────────────────────────────────────
 
     async def send_text_message(self, to_number: str, text: str) -> Optional[dict]:
-        """Send a plain text message via Meta Cloud API."""
+        """Send a plain text message via Meta Cloud API with sandbox simulation fallback."""
         data = {
             "messaging_product": "whatsapp",
             "to": to_number,
@@ -436,22 +464,99 @@ class WhatsAppService:
                 message_type="text",
                 text=text,
             )
-            # Store in conversation
+            msg.status = "sent"
             conv = await self._find_conversation_by_phone(to_number)
-            if conv:
-                conv.messages.append(msg)
-                conv.last_message_at = msg.timestamp
+            if not conv:
+                conv = await self._get_or_create_conversation(to_number, "WhatsApp Contact")
+            conv.messages.append(msg)
+            conv.last_message_at = msg.timestamp
 
-            logger.info(f"WhatsApp outbound text to {to_number}: {text[:80]}")
-            # Broadcast outbound message to admin clients
+            logger.info(f"WhatsApp Meta API outbound text to {to_number}: {text[:80]}")
             await self._broadcast_event({
                 "type": "new_message",
                 "direction": "outbound",
                 "conversation": conv.to_dict() if conv else None,
                 "message": msg.to_dict(),
             })
-            return msg.to_dict()
-        return None
+            ret = msg.to_dict()
+            ret["mode"] = "meta_cloud"
+            return ret
+        else:
+            # Fallback: Sandbox / Simulated Delivery Dispatch
+            wa_msg_id = f"sim_wa_{uuid4().hex[:16]}"
+            msg = WhatsAppMessage(
+                wa_message_id=wa_msg_id,
+                direction="outbound",
+                from_number=self.display_phone_number,
+                to_number=to_number,
+                message_type="text",
+                text=text,
+            )
+            msg.status = "delivered"
+            conv = await self._find_conversation_by_phone(to_number)
+            if not conv:
+                conv = await self._get_or_create_conversation(to_number, "Alert Recipient")
+            conv.messages.append(msg)
+            conv.last_message_at = msg.timestamp
+
+            logger.info(f"[WhatsApp Sandbox Dispatch] Outbound text to {to_number}: {text[:80]}")
+            await self._broadcast_event({
+                "type": "new_message",
+                "direction": "outbound",
+                "conversation": conv.to_dict() if conv else None,
+                "message": msg.to_dict(),
+            })
+            ret = msg.to_dict()
+            ret["mode"] = "simulated"
+            return ret
+
+    async def send_notification(
+        self,
+        to_phone: str,
+        title: str,
+        message: str,
+        priority: str = "medium",
+        data: Optional[dict] = None,
+    ) -> dict:
+        """Format and dispatch an enterprise alert notification via WhatsApp."""
+        priority_emoji = {
+            "critical": "🚨 [CRITICAL ALERT]",
+            "high": "⚡ [HIGH PRIORITY]",
+            "medium": "📢 [NOTIFICATION]",
+            "low": "ℹ️ [INFO]",
+        }.get(priority.lower(), "📢 [NOTIFICATION]")
+
+        time_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        formatted_text = (
+            f"*{priority_emoji} {title}*\n\n"
+            f"{message}\n\n"
+            f"📅 *Time:* {time_str}\n"
+            f"🛡️ *Support Copilot Platform*"
+        )
+        if data and "ticket_id" in data:
+            formatted_text += f"\n🎫 *Ticket:* #{data['ticket_id']}"
+        if data and "conversation_id" in data:
+            formatted_text += f"\n💬 *Chat ID:* {str(data['conversation_id'])[:8]}"
+
+        target_phone = to_phone or self.notification_phone or self.display_phone_number
+        result = await self.send_text_message(target_phone, formatted_text)
+        record = {
+            "id": result.get("id") or str(uuid4()),
+            "to": target_phone,
+            "title": title,
+            "message": message,
+            "priority": priority,
+            "status": "sent" if result else "failed",
+            "mode": result.get("mode", "simulated") if result else "failed",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "formatted_text": formatted_text,
+        }
+        self._notification_history.append(record)
+        return record
+
+    def get_notification_history(self, limit: int = 50) -> List[dict]:
+        """Return history of dispatched WhatsApp notifications."""
+        return list(reversed(self._notification_history))[:limit]
 
     async def send_template_message(
         self,

@@ -63,6 +63,9 @@ class AgentState(TypedDict):
     # Follow-up Suggestions (from Follow-up Agent)
     suggested_followups: List[str]
 
+    # Handoff Priority (from Escalation Agent)
+    handoff_priority: Optional[str]
+
     # Metadata
     error: Optional[str]
     step_count: int
@@ -132,11 +135,10 @@ def create_agent_graph():
     # Retrieval always goes to support
     workflow.add_edge("retrieval", "support")
 
-    # Support goes to tool-use or reflection (conditional — skip tool-use for simple intents)
     def should_use_tools(state: AgentState) -> str:
         """Skip tool-use for greetings, escalation requests, and feedback."""
         intent = state.get("intent", "question")
-        if intent in ("greeting", "escalation", "feedback"):
+        if intent in ("greeting", "escalation", "escalation_request", "feedback"):
             return "reflection"
         return "tool_use"
 

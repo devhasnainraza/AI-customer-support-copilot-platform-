@@ -169,6 +169,17 @@ class ConnectionManager:
         for connection_id in connection_ids:
             await self.send_personal_message(message, connection_id)
 
+    async def broadcast_to_agents(self, message: dict):
+        """
+        Broadcast message to all connected human agents / staff
+        """
+        agent_cids = [
+            cid for cid, meta in self.connection_metadata.items()
+            if meta.get("is_agent")
+        ]
+        for cid in agent_cids:
+            await self.send_personal_message(message, cid)
+
     def get_active_connections_count(self) -> int:
         """Get total number of active connections"""
         return len(self.active_connections)

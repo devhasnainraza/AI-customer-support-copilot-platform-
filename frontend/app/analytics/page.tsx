@@ -45,7 +45,7 @@ export default function AnalyticsPage() {
       if (!isAuthenticated) {
         router.push('/login?redirect=/analytics')
       } else if (role === 'customer') {
-        router.push('/chat')
+        router.push('/customer/chat')
       }
     }
   }, [authLoading, isAuthenticated, role, router])
@@ -89,65 +89,35 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#fbfbfa] bg-dot-grid text-slate-900">
-      {/* Navigation Header */}
-      <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-200/80">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-white font-extrabold text-lg shadow-md">
-                C
-              </div>
-              <span className="font-bold text-lg text-slate-900">Copilot Portal</span>
-            </Link>
-            <span className="text-slate-300">/</span>
-            <span className="text-sm font-semibold text-slate-600">Analytics Dashboard</span>
+    <div className="space-y-8 animate-fade-in">
+      {/* Header Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200/80 pb-6">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-2xl font-black tracking-tight text-slate-900">
+              Executive Analytics & Telemetry
+            </h1>
+            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-teal-100 text-teal-700">
+              Real-time BI
+            </span>
           </div>
-
-          <div className="flex items-center gap-3">
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(Number(e.target.value))}
-              className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
-            >
-              <option value={7}>Last 7 Days</option>
-              <option value={30}>Last 30 Days</option>
-              <option value={90}>Last 90 Days</option>
-            </select>
-
-            {role === 'admin' && (
-              <Link
-                href="/admin"
-                className="px-4 py-2 text-xs font-bold rounded-xl bg-slate-900 hover:bg-indigo-600 text-white transition-all shadow-md"
-              >
-                Admin Center
-              </Link>
-            )}
-
-            <button
-              onClick={() => void logout()}
-              className="rounded-xl border border-rose-200/80 bg-rose-50 hover:bg-rose-100 px-3.5 py-2 text-xs font-bold text-rose-700 transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
-              title="Sign Out"
-            >
-              <span>Sign Out</span>
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
-            Support Operations & Performance
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Real-time telemetry, AI self-service resolution rates, latency trends, and ROI metrics.
+          <p className="text-xs text-slate-500 mt-1">
+            Real-time telemetry, AI self-service resolution rates, latency trends, and ROI token economics.
           </p>
         </div>
+
+        <div className="flex items-center gap-3">
+          <select
+            value={dateRange}
+            onChange={(e) => setDateRange(Number(e.target.value))}
+            className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+          >
+            <option value={7}>Last 7 Days</option>
+            <option value={30}>Last 30 Days</option>
+            <option value={90}>Last 90 Days</option>
+          </select>
+        </div>
+      </div>
 
         {/* Overview KPI Cards */}
         <Overview metrics={overview} isLoading={isLoading} />
@@ -165,10 +135,9 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Human Agent Performance */}
-        <div className="mb-12">
+        <div className="mb-6">
           <AgentPerformance agents={agents} isLoading={isLoading} />
         </div>
-      </main>
     </div>
   )
 }

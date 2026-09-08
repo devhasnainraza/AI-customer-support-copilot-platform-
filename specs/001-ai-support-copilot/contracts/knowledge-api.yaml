@@ -1,0 +1,433 @@
+openapi: 3.0.3
+info:
+  title: Knowledge Base API
+  description: Document management and knowledge base administration
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+  - url: http://localhost:8000/v1
+    description: Local development
+
+paths:
+  /knowledge/documents:
+    post:
+      summary: Upload new document to knowledge base
+      operationId: uploadDocument
+      tags: [Documents]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - language
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Document file (PDF, DOCX, TXT, Markdown, HTML)
+                language:
+                  type: string
+                  description: ISO 639-1 language code
+                  example: "en"
+                metadata:
+                  type: object
+                  description: Optional metadata (title, tags, etc.)
+                  properties:
+                    title:
+                      type: string
+                    tags:
+                      type: array
+                      items:
+                        type: string
+      responses:
+        '202':
+          description: Document accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          description: Invalid file format or size
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Forbidden - requires admin role
+
+    get:
+      summary: List documents in knowledge base
+      operationId: listDocuments
+      tags: [Documents]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: language
+          in: query
+          schema:
+            type: string
+          description: Filter by language
+        - name: processing_status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Document'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /knowledge/documents/{document_id}:
+    get:
+      summary: Get document details
+      operationId: getDocument
+      tags: [Documents]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      summary: Update/replace document
+      operationId: updateDocument
+      tags: [Documents]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                metadata:
+                  type: object
+      responses:
+        '202':
+          description: Document update accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '403':
+          description: Forbidden - requires admin role
+
+    delete:
+      summary: Delete document and associated chunks
+      operationId: deleteDocument
+      tags: [Documents]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Document deleted
+        '403':
+          description: Forbidden - requires admin role
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /knowledge/documents/{document_id}/chunks:
+    get:
+      summary: Get document chunks (for verification)
+      operationId: listDocumentChunks
+      tags: [Chunks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: List of chunks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Chunk'
+                  total_chunks:
+                    type: integer
+
+  /knowledge/search:
+    post:
+      summary: Search knowledge base (admin preview)
+      operationId: searchKnowledge
+      tags: [Search]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: Search query
+                  maxLength: 500
+                language:
+                  type: string
+                  description: Target language (defaults to user preference)
+                  example: "en"
+                limit:
+                  type: integer
+                  default: 5
+                  maximum: 20
+                  description: Number of results to return
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query:
+                    type: string
+                  language:
+                    type: string
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SearchResult'
+
+  /knowledge/languages:
+    get:
+      summary: Get supported languages
+      operationId: listSupportedLanguages
+      tags: [Languages]
+      responses:
+        '200':
+          description: List of supported languages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  languages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                          example: "en"
+                        name:
+                          type: string
+                          example: "English"
+                        document_count:
+                          type: integer
+                          description: Number of documents in this language
+                        is_active:
+                          type: boolean
+                          description: Whether this language has active knowledge base
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        file_type:
+          type: string
+          enum: [pdf, docx, txt, markdown, html]
+        file_size_bytes:
+          type: integer
+        language:
+          type: string
+        uploaded_by:
+          type: string
+          format: uuid
+        uploaded_by_name:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+        processing_status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        processing_error:
+          type: string
+          nullable: true
+        version:
+          type: integer
+        metadata:
+          type: object
+
+    DocumentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Document'
+        - type: object
+          properties:
+            chunk_count:
+              type: integer
+            file_url:
+              type: string
+              description: Presigned URL for file download (admin only)
+            processing_started_at:
+              type: string
+              format: date-time
+              nullable: true
+            processing_completed_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    Chunk:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        content:
+          type: string
+        position:
+          type: integer
+        token_count:
+          type: integer
+        metadata:
+          type: object
+
+    SearchResult:
+      type: object
+      properties:
+        chunk_id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        document_name:
+          type: string
+        content:
+          type: string
+        relevance_score:
+          type: number
+          format: float
+          description: Similarity score (0.0-1.0)
+        metadata:
+          type: object
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              message:
+                type: string
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              message:
+                type: string

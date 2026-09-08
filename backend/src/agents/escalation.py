@@ -39,9 +39,9 @@ async def escalation_agent(state: AgentState) -> AgentState:
             sentiment = state.get('sentiment', 'neutral')
             urgency = state.get('sentiment_urgency', 'low')
             if urgency in ('high', 'critical') or sentiment in ('angry', 'frustrated'):
-                state['_handoff_priority'] = 'high'
+                state['handoff_priority'] = 'high'
             else:
-                state['_handoff_priority'] = 'medium'
+                state['handoff_priority'] = 'medium'
 
         # Trigger 2: Low confidence
         elif state.get('confidence_score', 1.0) < 0.6:

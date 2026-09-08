@@ -1,0 +1,456 @@
+openapi: 3.0.3
+info:
+  title: Analytics API
+  description: Support performance metrics and dashboard data
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+  - url: http://localhost:8000/v1
+    description: Local development
+
+paths:
+  /analytics/overview:
+    get:
+      summary: Get dashboard overview metrics
+      operationId: getOverview
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Start of date range (ISO 8601)
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: End of date range (ISO 8601)
+        - name: language
+          in: query
+          schema:
+            type: string
+          description: Filter by language
+      responses:
+        '200':
+          description: Overview metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Forbidden - requires manager role
+
+  /analytics/resolution-rate:
+    get:
+      summary: Get AI resolution rate over time
+      operationId: getResolutionRate
+      tags: [Metrics]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: granularity
+          in: query
+          schema:
+            type: string
+            enum: [hourly, daily, weekly]
+            default: daily
+      responses:
+        '200':
+          description: Resolution rate time series
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period:
+                    type: object
+                    properties:
+                      start:
+                        type: string
+                        format: date
+                      end:
+                        type: string
+                        format: date
+                  granularity:
+                    type: string
+                  data_points:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                        ai_resolved_count:
+                          type: integer
+                        escalated_count:
+                          type: integer
+                        resolution_rate:
+                          type: number
+                          format: float
+                          description: Percentage (0-100)
+
+  /analytics/response-times:
+    get:
+      summary: Get response time statistics
+      operationId: getResponseTimes
+      tags: [Metrics]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Response time statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ai_response_times:
+                    $ref: '#/components/schemas/ResponseTimeStats'
+                  human_response_times:
+                    $ref: '#/components/schemas/ResponseTimeStats'
+
+  /analytics/top-topics:
+    get:
+      summary: Get top unresolved topics
+      operationId: getTopTopics
+      tags: [Insights]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+      responses:
+        '200':
+          description: Top unresolved topics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  topics:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        topic:
+                          type: string
+                          description: Topic/category name
+                        conversation_count:
+                          type: integer
+                        escalation_rate:
+                          type: number
+                          format: float
+                          description: Percentage (0-100)
+                        avg_confidence_score:
+                          type: number
+                          format: float
+                        sample_questions:
+                          type: array
+                          items:
+                            type: string
+                          description: Example customer questions
+
+  /analytics/costs:
+    get:
+      summary: Get cost metrics
+      operationId: getCosts
+      tags: [Metrics]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Cost breakdown
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_cost_usd:
+                    type: number
+                    format: float
+                  breakdown:
+                    type: object
+                    properties:
+                      ai_inference_cost:
+                        type: number
+                        format: float
+                      embedding_generation_cost:
+                        type: number
+                        format: float
+                      infrastructure_cost:
+                        type: number
+                        format: float
+                  per_conversation_cost:
+                    type: number
+                    format: float
+                  total_conversations:
+                    type: integer
+                  cost_savings_vs_human_baseline:
+                    type: object
+                    properties:
+                      estimated_savings_usd:
+                        type: number
+                        format: float
+                      savings_percentage:
+                        type: number
+                        format: float
+
+  /analytics/agent-performance:
+    get:
+      summary: Get human agent performance metrics
+      operationId: getAgentPerformance
+      tags: [Agents]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: agent_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter to specific agent
+      responses:
+        '200':
+          description: Agent performance data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        agent_id:
+                          type: string
+                          format: uuid
+                        agent_name:
+                          type: string
+                        conversations_handled:
+                          type: integer
+                        avg_response_time_seconds:
+                          type: number
+                          format: float
+                        resolution_rate:
+                          type: number
+                          format: float
+                          description: Percentage (0-100)
+                        avg_satisfaction_score:
+                          type: number
+                          format: float
+                        total_hours_active:
+                          type: number
+                          format: float
+
+  /analytics/confidence-analysis:
+    get:
+      summary: Analyze AI confidence vs actual resolution correlation
+      operationId: getConfidenceAnalysis
+      tags: [Insights]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Confidence analysis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  buckets:
+                    type: array
+                    description: Confidence score buckets
+                    items:
+                      type: object
+                      properties:
+                        confidence_range:
+                          type: string
+                          example: "0.8-0.9"
+                        conversation_count:
+                          type: integer
+                        escalation_rate:
+                          type: number
+                          format: float
+                        avg_satisfaction_score:
+                          type: number
+                          format: float
+                          nullable: true
+                  recommendations:
+                    type: array
+                    items:
+                      type: string
+                    description: Actionable recommendations based on analysis
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Overview:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            start:
+              type: string
+              format: date
+            end:
+              type: string
+              format: date
+        total_conversations:
+          type: integer
+        ai_resolution_rate:
+          type: number
+          format: float
+          description: Percentage (0-100)
+        avg_response_time_seconds:
+          type: number
+          format: float
+        escalation_rate:
+          type: number
+          format: float
+          description: Percentage (0-100)
+        avg_satisfaction_score:
+          type: number
+          format: float
+          description: Average CSAT (1-5 scale)
+        satisfaction_response_rate:
+          type: number
+          format: float
+          description: Percentage of conversations with CSAT feedback
+        total_tickets_created:
+          type: integer
+        comparison_to_previous_period:
+          type: object
+          properties:
+            resolution_rate_change:
+              type: number
+              format: float
+              description: Percentage point change
+            response_time_change:
+              type: number
+              format: float
+              description: Seconds change
+
+    ResponseTimeStats:
+      type: object
+      properties:
+        avg_seconds:
+          type: number
+          format: float
+        median_seconds:
+          type: number
+          format: float
+        p95_seconds:
+          type: number
+          format: float
+        p99_seconds:
+          type: number
+          format: float
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              message:
+                type: string

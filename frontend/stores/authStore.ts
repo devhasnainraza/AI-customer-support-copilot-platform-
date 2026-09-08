@@ -4,14 +4,46 @@
  */
 import { create } from 'zustand'
 import { User } from '@supabase/supabase-js'
-import { supabase, signIn, signUp, signOut, resetPasswordForEmail } from '@/lib/supabase'
+import { supabase, signIn, signInWithGoogle, signUp, signOut, resetPasswordForEmail } from '@/lib/supabase'
 
-export type UserRole = 'admin' | 'agent' | 'manager' | 'customer'
+export type UserRole = 'admin' | 'agent' | 'manager' | 'customer' | 'suspended'
 
 export function getUserRole(user: User | null): UserRole {
   if (!user) return 'customer'
-  const role = (user.app_metadata?.role || user.user_metadata?.role) as string | undefined
-  if (role === 'admin' || role === 'agent' || role === 'manager') return role
+
+  // 0. Check for account suspension FIRST
+  if (
+    user.user_metadata?.status === 'suspended' ||
+    user.app_metadata?.status === 'suspended'
+  ) {
+    return 'suspended'
+  }
+
+  // 1. Check explicit app_metadata / user_metadata from Supabase (source of truth)
+  const explicitRole = (user.app_metadata?.role || user.user_metadata?.role) as string | undefined
+  if (explicitRole === 'admin' || explicitRole === 'agent' || explicitRole === 'manager' || explicitRole === 'customer') {
+    return explicitRole
+  }
+
+  // 2. Check user-scoped local storage for this specific user ID only
+  if (typeof window !== 'undefined' && user?.id) {
+    try {
+      const userScopedRole = localStorage.getItem(`copilot.role.${user.id}`)
+      if (userScopedRole === 'admin' || userScopedRole === 'agent' || userScopedRole === 'manager' || userScopedRole === 'customer') {
+        return userScopedRole
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  // 3. Check known staff and customer emails
+  const email = (user.email || '').toLowerCase().trim()
+  if (email === 'developerhasnainraza@gmail.com' || email.includes('customer')) return 'customer'
+  if (email === 'mhattari1112@gmail.com' || email === 'admin@example.com' || email.startsWith('admin') || email.includes('+admin') || email.includes('admin@')) return 'admin'
+  if (email === 'info.mhraza@gmail.com' || email === 'info.mhr@gmail.com' || email.startsWith('manager') || email.includes('+manager') || email.includes('manager@')) return 'manager'
+  if (email === 'chat.hasnain@gmail.com' || email.startsWith('agent') || email.includes('+agent') || email.includes('agent@')) return 'agent'
+
   return 'customer'
 }
 
@@ -23,13 +55,15 @@ interface AuthState {
   // Actions
   initialize: () => Promise<void>
   login: (email: string, password: string) => Promise<void>
+  loginWithGoogle: (redirectTo?: string) => Promise<void>
   register: (email: string, password: string, metadata?: Record<string, unknown>) => Promise<void>
+  setUserRole: (role: UserRole) => Promise<void>
   logout: () => Promise<void>
-  requestPasswordReset: (email: string) => Promise<void>
+  requestPasswordReset: (email: string) => Promise<string>
   setUser: (user: User | null) => void
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isLoading: true,
   isAuthenticated: false,
@@ -42,6 +76,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       const { data: { session } } = await supabase.auth.getSession()
 
       if (session?.user) {
+        if (getUserRole(session.user) === 'suspended') {
+          await signOut()
+          set({ user: null, isAuthenticated: false, isLoading: false })
+          return
+        }
+
         set({
           user: session.user,
           isAuthenticated: true,
@@ -56,8 +96,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
 
       // Listen for auth changes
-      supabase.auth.onAuthStateChange((_event, session) => {
+      supabase.auth.onAuthStateChange(async (_event, session) => {
         if (session?.user) {
+          if (getUserRole(session.user) === 'suspended') {
+            await signOut()
+            set({ user: null, isAuthenticated: false, isLoading: false })
+            return
+          }
           set({
             user: session.user,
             isAuthenticated: true,
@@ -81,11 +126,26 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       set({ isLoading: true })
       const { user } = await signIn(email, password)
+      if (user && getUserRole(user) === 'suspended') {
+        await signOut()
+        set({ user: null, isAuthenticated: false, isLoading: false })
+        throw new Error('Your account has been suspended by an administrator.')
+      }
       set({
         user: user || null,
         isAuthenticated: !!user,
         isLoading: false
       })
+    } catch (error) {
+      set({ isLoading: false })
+      throw error
+    }
+  },
+
+  loginWithGoogle: async (redirectTo?: string) => {
+    try {
+      set({ isLoading: true })
+      await signInWithGoogle(redirectTo)
     } catch (error) {
       set({ isLoading: false })
       throw error
@@ -114,9 +174,39 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
+  setUserRole: async (role: UserRole) => {
+    const user = get().user
+    if (!user || !user.email) return
+
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`copilot.role.${user.id}`, role)
+        localStorage.setItem('copilot.user.role', role)
+      }
+
+      // Sync with backend service role
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/v1/auth/set-role`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email, role })
+      })
+
+      // Refresh session
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
+        set({ user: session.user })
+      }
+    } catch (err) {
+      console.error('Failed to set user role:', err)
+    }
+  },
+
   logout: async () => {
     try {
       set({ isLoading: true })
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('copilot.user.role')
+      }
       await signOut()
       set({
         user: null,
@@ -129,11 +219,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  requestPasswordReset: async (email: string) => {
+  requestPasswordReset: async (email: string): Promise<string> => {
     try {
       set({ isLoading: true })
-      await resetPasswordForEmail(email)
+      const message = await resetPasswordForEmail(email)
       set({ isLoading: false })
+      return message
     } catch (error) {
       set({ isLoading: false })
       throw error

@@ -53,7 +53,26 @@ async def websocket_endpoint(
             await websocket.close(code=1008, reason="Conversation not found")
             return
 
-        if str(conversation.customer_id) != user_id:
+        # Verify conversation access: allow if user owns the conversation or has staff role
+        is_staff = user.get("role") in ("admin", "manager", "agent")
+        user_ids = {str(user.get("user_id")), str(user.get("customer_id"))} - {None, ""}
+        allowed = is_staff or str(conversation.customer_id) in user_ids
+
+        if not allowed:
+            # Fallback: check if conversation customer matches authenticated user's email
+            try:
+                from src.config.supabase import get_service_client
+                supabase = get_service_client()
+                cust_res = supabase.table("customers").select("email, auth_id").eq("id", str(conversation.customer_id)).limit(1).execute()
+                if cust_res.data:
+                    cust_row = cust_res.data[0]
+                    if cust_row.get("email") == user.get("email") or str(cust_row.get("auth_id")) == str(user.get("user_id")):
+                        allowed = True
+            except Exception:
+                pass
+
+        if not allowed:
+            logger.warning(f"WebSocket access denied for conv {conversation_id}: conv.customer_id={conversation.customer_id}, allowed_ids={user_ids}")
             await websocket.close(code=1008, reason="Access denied")
             return
 
@@ -74,6 +93,18 @@ async def websocket_endpoint(
             },
             connection_id
         )
+
+        # Send current handoff state if conversation is in handoff
+        from src.services.handoff_service import handoff_manager
+        current_handoff = handoff_manager.get_request(conversation_id)
+        if current_handoff and current_handoff.get("status") in ("waiting", "assigned", "in_progress"):
+            await manager.send_personal_message(
+                {
+                    "type": "handoff_notification",
+                    "handoff": current_handoff,
+                },
+                connection_id
+            )
 
         # Listen for messages
         while True:
@@ -125,33 +156,33 @@ async def websocket_endpoint(
                     # Check if conversation is in human-handoff — skip AI
                     from src.services.handoff_service import handoff_manager
                     handoff = handoff_manager.get_request(conversation_id)
-                    is_human_chat = handoff and handoff.get("status") in ("assigned", "in_progress")
+                    is_human_chat = handoff and handoff.get("status") in ("waiting", "assigned", "in_progress")
 
                     if is_human_chat:
-                        # Forward customer message to assigned agent instead of AI
-                        agent_id = handoff.get("assigned_agent_id")
-                        if agent_id:
-                            from src.services.handoff_service import agent_presence
-                            agent_info = agent_presence.get_agent(agent_id)
-                            if agent_info:
-                                # Broadcast to agent connections
-                                for cid, meta in manager.connection_metadata.items():
-                                    if meta.get("is_agent") and meta.get("agent_id") == agent_id:
-                                        try:
-                                            await manager.send_personal_message(
-                                                {
-                                                    "type": "message",
-                                                    "conversation_id": conversation_id,
-                                                    "sender": "customer",
-                                                    "sender_type": "customer",
-                                                    "content": content,
-                                                    "message_id": str(customer_message.id),
-                                                },
-                                                cid,
-                                            )
-                                        except Exception:
-                                            pass
-                        continue  # Don't trigger AI
+                        # Broadcast customer message to all connected agents
+                        from datetime import datetime, timezone
+                        msg_payload = {
+                            "type": "message",
+                            "conversation_id": conversation_id,
+                            "sender": "customer",
+                            "sender_type": "customer",
+                            "content": content,
+                            "message_id": str(customer_message.id),
+                            "id": str(customer_message.id),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                        await manager.broadcast_to_agents(msg_payload)
+
+                        # If in waiting queue, acknowledge waiting status
+                        if handoff.get("status") == "waiting":
+                            await manager.send_to_conversation(
+                                {
+                                    "type": "handoff_notification",
+                                    "handoff": handoff,
+                                },
+                                conversation_id,
+                            )
+                        continue  # Don't trigger AI in human handoff mode
 
                     # Send typing indicator
                     await manager.send_to_conversation(

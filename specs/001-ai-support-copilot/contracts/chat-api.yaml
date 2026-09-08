@@ -1,0 +1,473 @@
+openapi: 3.0.3
+info:
+  title: Chat API
+  description: Real-time chat interface for AI Customer Support Copilot
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+  - url: http://localhost:8000/v1
+    description: Local development
+
+paths:
+  /chat/conversations:
+    post:
+      summary: Create new conversation
+      operationId: createConversation
+      tags: [Conversations]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                language:
+                  type: string
+                  description: ISO 639-1 language code
+                  example: "en"
+                  default: "en"
+      responses:
+        '201':
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+    get:
+      summary: List conversations for authenticated customer
+      operationId: listConversations
+      tags: [Conversations]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, closed, escalated, abandoned]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Conversation'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /chat/conversations/{conversation_id}:
+    get:
+      summary: Get conversation details
+      operationId: getConversation
+      tags: [Conversations]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Conversation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update conversation (close, rate satisfaction)
+      operationId: updateConversation
+      tags: [Conversations]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [closed]
+                satisfaction_score:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+      responses:
+        '200':
+          description: Conversation updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+
+  /chat/conversations/{conversation_id}/messages:
+    get:
+      summary: Get conversation message history
+      operationId: listMessages
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: before
+          in: query
+          description: Timestamp for pagination (get messages before this)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Message history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+                  pagination:
+                    type: object
+                    properties:
+                      has_more:
+                        type: boolean
+                      oldest_timestamp:
+                        type: string
+                        format: date-time
+
+  /chat/conversations/{conversation_id}/escalate:
+    post:
+      summary: Request human agent escalation
+      operationId: escalateConversation
+      tags: [Conversations]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Optional reason for escalation
+                  maxLength: 500
+      responses:
+        '200':
+          description: Escalation requested
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [escalated, queued]
+                  estimated_wait_time_seconds:
+                    type: integer
+                    nullable: true
+                  message:
+                    type: string
+                    example: "Connecting you to a human agent..."
+
+  /chat/ws:
+    get:
+      summary: WebSocket endpoint for real-time chat
+      description: |
+        Establish WebSocket connection for bi-directional real-time chat.
+
+        **Connection URL**: `wss://api.example.com/v1/chat/ws?token={jwt_token}&conversation_id={uuid}`
+
+        **Message Protocol**:
+
+        Client → Server:
+        ```json
+        {
+          "type": "message",
+          "content": "How do I reset my password?",
+          "timestamp": "2024-06-20T12:00:00Z"
+        }
+        ```
+
+        Server → Client (AI response streaming):
+        ```json
+        {
+          "type": "message_start",
+          "message_id": "uuid",
+          "timestamp": "2024-06-20T12:00:01Z"
+        }
+        {
+          "type": "message_chunk",
+          "message_id": "uuid",
+          "content": "To reset your password",
+          "chunk_index": 0
+        }
+        {
+          "type": "message_chunk",
+          "message_id": "uuid",
+          "content": ", follow these steps...",
+          "chunk_index": 1
+        }
+        {
+          "type": "message_end",
+          "message_id": "uuid",
+          "confidence_score": 0.92,
+          "sources": [
+            {
+              "document_id": "uuid",
+              "chunk_id": "uuid",
+              "document_name": "User Guide.pdf",
+              "relevance_score": 0.87
+            }
+          ],
+          "timestamp": "2024-06-20T12:00:03Z"
+        }
+        ```
+
+        Server → Client (system events):
+        ```json
+        {
+          "type": "agent_joined",
+          "agent_id": "uuid",
+          "agent_name": "Sarah",
+          "timestamp": "2024-06-20T12:05:00Z"
+        }
+        {
+          "type": "typing_indicator",
+          "is_typing": true
+        }
+        {
+          "type": "error",
+          "code": "SERVICE_UNAVAILABLE",
+          "message": "AI service temporarily unavailable. Creating ticket...",
+          "retry_after_seconds": 30
+        }
+        ```
+
+        **Heartbeat**: Client sends `{"type": "ping"}` every 30s, server responds with `{"type": "pong"}`
+
+      tags: [WebSocket]
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: JWT authentication token
+        - name: conversation_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket connection established
+        '401':
+          description: Unauthorized - invalid token
+        '404':
+          description: Conversation not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, closed, escalated, abandoned]
+        language:
+          type: string
+          example: "en"
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        assigned_agent_id:
+          type: string
+          format: uuid
+          nullable: true
+        assigned_agent_name:
+          type: string
+          nullable: true
+        satisfaction_score:
+          type: integer
+          minimum: 1
+          maximum: 5
+          nullable: true
+        ai_resolution:
+          type: boolean
+        message_count:
+          type: integer
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        sender_type:
+          type: string
+          enum: [customer, ai, human_agent]
+        sender_id:
+          type: string
+          format: uuid
+        sender_name:
+          type: string
+          nullable: true
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        confidence_score:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          nullable: true
+        sources:
+          type: array
+          nullable: true
+          items:
+            type: object
+            properties:
+              document_id:
+                type: string
+                format: uuid
+              chunk_id:
+                type: string
+                format: uuid
+              document_name:
+                type: string
+              relevance_score:
+                type: number
+                format: float
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+  responses:
+    Unauthorized:
+      description: Unauthorized - invalid or missing authentication
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "Unauthorized"
+              message:
+                type: string
+                example: "Invalid or expired token"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "NotFound"
+              message:
+                type: string
+
+    RateLimited:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "RateLimitExceeded"
+              retry_after_seconds:
+                type: integer

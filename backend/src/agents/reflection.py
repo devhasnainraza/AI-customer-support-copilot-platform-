@@ -21,7 +21,7 @@ async def reflection_agent(state: AgentState) -> AgentState:
         logger.info(f"Reflection Agent processing conversation {state['conversation_id']}")
 
         ai_response = state.get('ai_response', '')
-        if not ai_response:
+        if not ai_response or state.get('intent') in ('greeting', 'escalation_request', 'escalation', 'feedback') or state.get('should_escalate'):
             state['reflection_passed'] = True
             state['reflection_issues'] = []
             state['reflection_action'] = 'pass'
@@ -71,8 +71,13 @@ If the response is good or issues are very minor, set passed to true and action 
             HumanMessage(content=f"User question: {state['user_message']}\n\nAI response:\n{ai_response}{context_block}")
         ]
 
-        response = await llm.ainvoke(messages)
-        raw = response.content.strip()
+        import asyncio
+        try:
+            response = await asyncio.wait_for(llm.ainvoke(messages), timeout=4.0)
+            raw = response.content.strip()
+        except asyncio.TimeoutError:
+            logger.warning("Reflection LLM timed out; passing by default")
+            raw = '{"passed": true, "issues": [], "action": "pass"}'
 
         try:
             if raw.startswith(""):

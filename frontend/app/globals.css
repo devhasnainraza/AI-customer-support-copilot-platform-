@@ -1,131 +1,246 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #fbfbfa;
-  --foreground: #0f172a;
+  --background: #f8fafc;
+  --foreground: #090d16;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
   
-  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-display: 'Outfit', sans-serif;
-
-  /* Premium Light HSL Colors */
-  --primary-base: 250 84% 54%; /* Indigo */
-  --secondary-base: 325 90% 55%; /* Rose/Pink */
-  --accent-base: 24 95% 53%; /* Warm Amber/Orange */
-  
-  --border-light: rgba(15, 23, 42, 0.06);
-  --border-medium: rgba(15, 23, 42, 0.12);
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 72px;
 }
 
 @theme inline {
   --font-sans: var(--font-sans);
   --font-display: var(--font-display);
-  --color-primary: hsl(var(--primary-base));
-  --color-secondary: hsl(var(--secondary-base));
-  --color-accent: hsl(var(--accent-base));
-  --color-background-custom: var(--background);
+  --font-mono: var(--font-mono);
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
-  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-/* Stunning Ambient Aurora Glow Blobs */
-@utility glow-blob-indigo {
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
-  filter: blur(80px);
-}
+/* ─────────────────────────────────────────────────────────────────────────────
+   VIP Surface & Elevation Design System
+   ───────────────────────────────────────────────────────────────────────────── */
 
-@utility glow-blob-rose {
-  background: radial-gradient(circle, rgba(244, 63, 94, 0.12) 0%, transparent 70%);
-  filter: blur(80px);
-}
-
-@utility glow-blob-amber {
-  background: radial-gradient(circle, rgba(249, 115, 22, 0.12) 0%, transparent 70%);
-  filter: blur(80px);
-}
-
-/* Elegant Vector Dot Background Pattern */
-@utility bg-dot-grid {
-  background-size: 24px 24px;
-  background-image: radial-gradient(rgba(15, 23, 42, 0.04) 1.2px, transparent 1.2px);
-}
-
-/* Glassmorphism Panels and Cards */
-@utility glass-panel {
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(14px) saturate(190%);
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.015);
-}
-
-@utility glass-card {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(12px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.7);
+/* Top-tier SaaS Card with Micro-Borders & Soft Ambient Shadow */
+.surface-vip {
+  background: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.85);
   box-shadow: 
-    0 1px 2px rgba(15, 23, 42, 0.02),
-    0 8px 30px rgba(15, 23, 42, 0.03);
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    0 1px 3px 0 rgba(15, 23, 42, 0.03),
+    0 6px 16px -2px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
+  border-radius: 1.25rem;
 }
 
-@utility glass-card-hover {
+.surface-vip-interactive {
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.surface-vip-interactive:hover {
   transform: translateY(-2px);
-  border-color: rgba(99, 102, 241, 0.25);
+  border-color: rgba(199, 210, 254, 0.9);
   box-shadow: 
-    0 1px 2px rgba(99, 102, 241, 0.02),
-    0 12px 36px rgba(99, 102, 241, 0.08);
+    0 4px 6px -1px rgba(15, 23, 42, 0.03),
+    0 16px 32px -4px rgba(99, 102, 241, 0.08),
+    inset 0 1px 0 0 rgba(255, 255, 255, 1);
 }
 
-/* Modern Pill Badges */
-@utility premium-badge {
+/* Frosted Glass Floating Header/Sidebar */
+.surface-glass {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+/* Inset Well Surface for Code/Tables/Lists */
+.surface-inset {
+  background: #f8fafc;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: inset 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   VIP Buttons & Interactive Controls
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.btn-vip-primary {
+  background: linear-gradient(180deg, #4f46e5 0%, #4338ca 100%);
+  color: #ffffff;
+  font-weight: 700;
+  border: 1px solid #3730a3;
+  box-shadow: 
+    0 1px 2px 0 rgba(0, 0, 0, 0.08),
+    0 4px 12px 0 rgba(79, 70, 229, 0.24),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-vip-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #4338ca 0%, #3730a3 100%);
+  box-shadow: 
+    0 2px 4px 0 rgba(0, 0, 0, 0.12),
+    0 8px 20px 0 rgba(79, 70, 229, 0.32),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+.btn-vip-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1);
+}
+
+.btn-vip-secondary {
+  background: #ffffff;
+  color: #1e293b;
+  font-weight: 700;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-vip-secondary:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.06);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   VIP Badges & Status Indicators
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.badge-vip {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
   border-radius: 9999px;
-  border: 1px solid rgba(99, 102, 241, 0.08);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(244, 63, 94, 0.04) 100%);
-  padding: 0.25rem 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #4f46e5;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+  border-width: 1px;
 }
 
-/* Custom Scrollbar */
+.badge-vip-indigo {
+  background: #eef2ff;
+  color: #4338ca;
+  border-color: #c7d2fe;
+}
+
+.badge-vip-emerald {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.badge-vip-amber {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.badge-vip-rose {
+  background: #fff1f2;
+  color: #be123c;
+  border-color: #fecdd3;
+}
+
+.badge-vip-slate {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Background Grids, Dot Matrices & Ambient Glows
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.bg-dot-grid {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.25) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.bg-grid-subtle {
+  background-image: 
+    linear-gradient(to right, rgba(226, 232, 240, 0.6) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(226, 232, 240, 0.6) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.ambient-glow-indigo {
+  background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.12) 0%, rgba(99, 102, 241, 0) 70%);
+}
+
+.ambient-glow-mesh {
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(236, 72, 153, 0.06) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Live Telemetry Animations
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.radar-live {
+  animation: pulse-ring 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Custom Smooth Micro-Scrollbars
+   ───────────────────────────────────────────────────────────────────────────── */
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
 }
-
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.02);
+  background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.25);
-  border-radius: 4px;
+  background: #cbd5e1;
+  border-radius: 9999px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.4);
+  background: #94a3b8;
 }
 
-/* Smooth layout and interactive transitions */
-.transition-premium {
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
-/* Accent gradient text utilities */
-.text-gradient {
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  background-image: linear-gradient(135deg, #4f46e5 0%, #ec4899 50%, #f97316 100%);
+.font-display {
+  font-family: var(--font-display);
 }
 
+.font-mono {
+  font-family: var(--font-mono);
+}

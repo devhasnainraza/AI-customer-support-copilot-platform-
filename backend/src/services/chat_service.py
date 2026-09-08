@@ -50,7 +50,31 @@ class ChatService:
                 "ai_resolution": False,
             }
 
-            result = supabase.table("conversations").insert(data).execute()
+            try:
+                result = supabase.table("conversations").insert(data).execute()
+            except Exception as insert_err:
+                # If foreign key constraint failed, ensure customer row exists and retry
+                logger.warning(f"Initial conversation insert failed ({insert_err}), verifying customer row...")
+                try:
+                    cust_chk = supabase.table("customers").select("id").eq("id", str(customer_id)).execute()
+                    if not cust_chk.data:
+                        # Also check by auth_id
+                        by_auth = supabase.table("customers").select("id").eq("auth_id", str(customer_id)).execute()
+                        if by_auth.data:
+                            data["customer_id"] = str(by_auth.data[0]["id"])
+                        else:
+                            supabase.table("customers").insert({
+                                "id": str(customer_id),
+                                "auth_id": str(customer_id),
+                                "email": f"customer_{str(customer_id)[:8]}@example.com",
+                                "name": "Customer",
+                                "role": "customer",
+                                "tenant_id": str(tenant_id),
+                            }).execute()
+                    result = supabase.table("conversations").insert(data).execute()
+                except Exception as retry_err:
+                    logger.error(f"Retry conversation insert failed: {retry_err}")
+                    raise retry_err
 
             if not result.data:
                 raise Exception("Failed to create conversation")
@@ -82,22 +106,28 @@ class ChatService:
     @staticmethod
     async def get_customer_conversations(
         customer_id: UUID,
+        alternate_customer_id: Optional[UUID] = None,
         limit: int = 50
     ) -> List[Conversation]:
-        """Get all conversations for a customer"""
+        """Get all conversations for a customer (supporting primary & alternate customer ids, excluding blank sessions)"""
         supabase = get_service_client()
 
         try:
-            result = (
-                supabase.table("conversations")
-                .select("*")
-                .eq("customer_id", str(customer_id))
-                .order("started_at", desc=True)
-                .limit(limit)
-                .execute()
-            )
+            query = supabase.table("conversations").select("*, messages(id)")
+            if alternate_customer_id and str(alternate_customer_id) != str(customer_id):
+                query = query.or_(f"customer_id.eq.{customer_id},customer_id.eq.{alternate_customer_id}")
+            else:
+                query = query.eq("customer_id", str(customer_id))
 
-            return [Conversation(**conv) for conv in result.data]
+            result = query.order("started_at", desc=True).limit(limit).execute()
+
+            non_empty_convs = []
+            for conv in result.data:
+                msgs = conv.pop("messages", [])
+                if msgs and len(msgs) > 0:
+                    non_empty_convs.append(Conversation(**conv))
+
+            return non_empty_convs
 
         except Exception as e:
             logger.error(f"Failed to get conversations for customer {customer_id}: {e}")

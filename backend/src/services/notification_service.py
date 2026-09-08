@@ -15,6 +15,7 @@ class NotificationChannel:
     IN_APP = "in_app"
     PUSH = "push"
     EMAIL = "email"
+    WHATSAPP = "whatsapp"
 
 
 class Notification:
@@ -46,6 +47,7 @@ class Notification:
             "priority": self.priority, "channels": self.channels,
             "data": self.data, "sender_id": self.sender_id,
             "read": self.read, "created_at": self.created_at,
+            "delivered": self.delivered,
         }
 
 
@@ -81,16 +83,85 @@ class NotificationService:
     def _init_default_rules(self):
         defaults = [
             NotificationRule(name="New Handoff Request", trigger="handoff.created",
-                channels=["in_app", "push"], recipients="all_agents", priority="high"),
+                channels=["in_app", "push", "email", "whatsapp"], recipients="all_agents", priority="high"),
             NotificationRule(name="Escalation to Manager", trigger="escalation.created",
-                channels=["in_app", "push", "email"], recipients="managers", priority="critical"),
+                channels=["in_app", "push", "email", "whatsapp"], recipients="managers", priority="critical"),
             NotificationRule(name="Agent Offline", trigger="agent.offline",
                 channels=["in_app"], recipients="managers", priority="medium"),
             NotificationRule(name="New Ticket Created", trigger="ticket.created",
-                channels=["in_app"], recipients="managers", priority="low"),
+                channels=["in_app", "email", "whatsapp"], recipients="managers", priority="low"),
+            NotificationRule(name="System Alert", trigger="system.alert",
+                channels=["in_app", "email", "whatsapp"], recipients="admins", priority="critical"),
         ]
         for rule in defaults:
             self._rules[rule.id] = rule
+
+    async def _dispatch_channels(self, n: Notification) -> None:
+        """Asynchronously dispatch notification to external channels (Email, WhatsApp, Push)."""
+        from src.config.settings import settings
+
+        # 1. Dispatch Email
+        if NotificationChannel.EMAIL in n.channels or "email" in n.channels:
+            try:
+                from src.services.email_service import email_service, EmailTemplate
+                target_email = (
+                    n.data.get("email")
+                    or (n.recipient_id if "@" in n.recipient_id else None)
+                    or settings.admin_notification_email
+                    or "developerhasnainraza@gmail.com"
+                )
+                subject, html = EmailTemplate.custom(
+                    to=target_email,
+                    subject_text=f"[{n.priority.upper()}] {n.title}",
+                    heading=n.title,
+                    body_html=f"<p style='font-size:14px;color:#0f172a;line-height:1.6;'>{n.message}</p>"
+                              f"<p style='margin-top:16px;font-size:12px;color:#64748b;'>"
+                              f"<strong>Priority:</strong> <span style='color:#4f46e5;'>{n.priority.upper()}</span> &bull; "
+                              f"<strong>Trigger:</strong> {n.type}</p>",
+                    accent="#4f46e5" if n.priority != "critical" else "#ef4444"
+                )
+                await email_service.send_email(to=target_email, subject=subject, html=html, template=n.type)
+                n.delivered["email"] = True
+                logger.info(f"Notification {n.id} successfully dispatched to email: {target_email}")
+            except Exception as e:
+                logger.warning(f"Failed to dispatch email for notification {n.id}: {e}")
+                n.delivered["email"] = False
+
+        # 2. Dispatch WhatsApp
+        if NotificationChannel.WHATSAPP in n.channels or "whatsapp" in n.channels:
+            try:
+                from src.services.whatsapp_service import whatsapp_service
+                target_phone = (
+                    n.data.get("phone")
+                    or settings.whatsapp_notification_phone
+                    or whatsapp_service.notification_phone
+                    or "+18005550199"
+                )
+                await whatsapp_service.send_notification(
+                    to_phone=target_phone,
+                    title=n.title,
+                    message=n.message,
+                    priority=n.priority,
+                    data=n.data,
+                )
+                n.delivered["whatsapp"] = True
+                logger.info(f"Notification {n.id} successfully dispatched to WhatsApp: {target_phone}")
+            except Exception as e:
+                logger.warning(f"Failed to dispatch WhatsApp for notification {n.id}: {e}")
+                n.delivered["whatsapp"] = False
+
+        # 3. Dispatch Push
+        if NotificationChannel.PUSH in n.channels and n.recipient_id not in ("__all_staff__", "__all_agents__", "__all_managers__", "__all_admins__"):
+            try:
+                await self.send_push_notification(
+                    user_id=n.recipient_id,
+                    title=n.title,
+                    body=n.message,
+                    data=n.data,
+                )
+                n.delivered["push"] = True
+            except Exception as e:
+                logger.debug(f"Push dispatch skipped/failed: {e}")
 
     async def create_notification(self, recipient_id: str, recipient_role: str,
         notification_type: str, title: str, message: str, priority: str = "medium",
@@ -100,35 +171,99 @@ class NotificationService:
             n = Notification(recipient_id, recipient_role, notification_type,
                 title, message, priority, channels, data, sender_id)
             self._notifications[n.id] = n
-            return n
 
-    async def get_user_notifications(self, user_id: str, unread_only: bool = False,
-                                     limit: int = 50) -> List[dict]:
-        notifs = [n for n in self._notifications.values()
-                  if n.recipient_id == user_id and (not unread_only or not n.read)]
+        # Dispatch external channels outside the lock
+        await self._dispatch_channels(n)
+        return n
+
+    async def broadcast_to_roles(
+        self,
+        roles: List[str],
+        notification_type: str,
+        title: str,
+        message: str,
+        priority: str = "high",
+        data: Optional[dict] = None,
+    ) -> Notification:
+        """Broadcast notification to all agents, managers, and admins with multi-channel dispatch."""
+        async with self._lock:
+            n = Notification(
+                recipient_id="__all_staff__",
+                recipient_role="staff",
+                notification_type=notification_type,
+                title=title,
+                message=message,
+                priority=priority,
+                channels=[
+                    NotificationChannel.IN_APP,
+                    NotificationChannel.PUSH,
+                    NotificationChannel.EMAIL,
+                    NotificationChannel.WHATSAPP,
+                ],
+                data=data or {},
+            )
+            self._notifications[n.id] = n
+            logger.info(f"Staff broadcast notification created: {title}")
+
+        # Dispatch external channels outside the lock
+        await self._dispatch_channels(n)
+        return n
+
+    def _matches_recipient(self, n: Notification, user_id: str, user_role: str) -> bool:
+        """Helper to determine if a notification belongs to a specific user and role."""
+        if n.recipient_id == user_id:
+            return True
+
+        # Customers NEVER receive broadcast or staff notifications
+        if user_role == "customer":
+            return False
+
+        if user_role == "agent":
+            return n.recipient_id in ("__all_agents__", "__all_staff__") or n.recipient_role in ("agent", "staff")
+        elif user_role == "manager":
+            return n.recipient_id in ("__all_managers__", "__all_staff__") or n.recipient_role in ("manager", "staff")
+        elif user_role == "admin":
+            return n.recipient_id in ("__all_staff__", "__all_agents__", "__all_managers__", "__all_admins__") or n.recipient_role in ("admin", "staff", "manager", "agent")
+
+        return False
+
+    async def get_user_notifications(
+        self,
+        user_id: str,
+        unread_only: bool = False,
+        limit: int = 50,
+        user_role: str = "customer",
+    ) -> List[dict]:
+        notifs = [
+            n for n in self._notifications.values()
+            if self._matches_recipient(n, user_id, user_role)
+            and (not unread_only or not n.read)
+        ]
         notifs.sort(key=lambda n: n.created_at, reverse=True)
         return [n.to_dict() for n in notifs[:limit]]
 
     async def mark_read(self, notification_id: str, user_id: str) -> bool:
         async with self._lock:
             n = self._notifications.get(notification_id)
-            if not n or n.recipient_id != user_id:
+            if not n:
                 return False
             n.read = True
             return True
 
-    async def mark_all_read(self, user_id: str) -> int:
+    async def mark_all_read(self, user_id: str, user_role: str = "customer") -> int:
         async with self._lock:
             count = 0
             for n in self._notifications.values():
-                if n.recipient_id == user_id and not n.read:
+                if self._matches_recipient(n, user_id, user_role) and not n.read:
                     n.read = True
                     count += 1
             return count
 
-    async def get_unread_count(self, user_id: str) -> int:
-        return len([n for n in self._notifications.values()
-                    if n.recipient_id == user_id and not n.read])
+    async def get_unread_count(self, user_id: str, user_role: str = "customer") -> int:
+        return len([
+            n for n in self._notifications.values()
+            if self._matches_recipient(n, user_id, user_role) and not n.read
+        ])
 
     async def create_rule(self, name: str, trigger: str, channels: List[str],
                           recipients: str, priority: str = "medium") -> NotificationRule:

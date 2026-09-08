@@ -1,0 +1,416 @@
+openapi: 3.0.3
+info:
+  title: Ticket API
+  description: Support ticket management and tracking
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+  - url: http://localhost:8000/v1
+    description: Local development
+
+paths:
+  /tickets:
+    post:
+      summary: Create ticket manually
+      operationId: createTicket
+      tags: [Tickets]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - conversation_id
+              properties:
+                conversation_id:
+                  type: string
+                  format: uuid
+                priority:
+                  type: string
+                  enum: [low, medium, high, critical]
+                  default: medium
+                category:
+                  type: string
+                  example: "technical"
+      responses:
+        '201':
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400':
+          description: Invalid input or conversation already has ticket
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    get:
+      summary: List tickets
+      operationId: listTickets
+      tags: [Tickets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, in_progress, waiting_customer, resolved, closed]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: assigned_to_me
+          in: query
+          schema:
+            type: boolean
+          description: Filter to tickets assigned to authenticated agent
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of tickets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ticket'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /tickets/{ticket_id}:
+    get:
+      summary: Get ticket details
+      operationId: getTicket
+      tags: [Tickets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Ticket details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update ticket
+      operationId: updateTicket
+      tags: [Tickets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [open, in_progress, waiting_customer, resolved, closed]
+                priority:
+                  type: string
+                  enum: [low, medium, high, critical]
+                assigned_agent_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                assigned_team:
+                  type: string
+                  nullable: true
+                category:
+                  type: string
+                notes:
+                  type: string
+                  description: Internal notes (agent only)
+      responses:
+        '200':
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '403':
+          description: Forbidden - requires agent role
+
+  /tickets/{ticket_id}/conversation:
+    get:
+      summary: Get conversation linked to ticket
+      operationId: getTicketConversation
+      tags: [Tickets]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Conversation details with full message history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversation:
+                    $ref: '#/components/schemas/Conversation'
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+
+  /tickets/search:
+    post:
+      summary: Search tickets by number or content
+      operationId: searchTickets
+      tags: [Tickets]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: Ticket number or search term
+                  maxLength: 200
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ticket'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        ticket_number:
+          type: string
+          example: "TICK-20260620-0001"
+        conversation_id:
+          type: string
+          format: uuid
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [open, in_progress, waiting_customer, resolved, closed]
+        category:
+          type: string
+          nullable: true
+        assigned_team:
+          type: string
+          nullable: true
+        assigned_agent_id:
+          type: string
+          format: uuid
+          nullable: true
+        assigned_agent_name:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          type: string
+          enum: [ai_auto, human_manual]
+        ai_summary:
+          type: string
+          description: AI-generated summary of the issue
+          nullable: true
+
+    TicketDetail:
+      allOf:
+        - $ref: '#/components/schemas/Ticket'
+        - type: object
+          properties:
+            customer:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                name:
+                  type: string
+                email:
+                  type: string
+            conversation_preview:
+              type: object
+              properties:
+                message_count:
+                  type: integer
+                last_message_at:
+                  type: string
+                  format: date-time
+                last_message_preview:
+                  type: string
+            timeline:
+              type: array
+              description: Ticket status change history
+              items:
+                type: object
+                properties:
+                  timestamp:
+                    type: string
+                    format: date-time
+                  event:
+                    type: string
+                    example: "status_changed"
+                  from_value:
+                    type: string
+                    nullable: true
+                  to_value:
+                    type: string
+                  actor_id:
+                    type: string
+                    format: uuid
+                  actor_name:
+                    type: string
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, closed, escalated, abandoned]
+        language:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        sender_type:
+          type: string
+          enum: [customer, ai, human_agent]
+        sender_name:
+          type: string
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        confidence_score:
+          type: number
+          format: float
+          nullable: true
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              message:
+                type: string
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              message:
+                type: string

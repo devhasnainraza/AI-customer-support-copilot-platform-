@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 1440
 
-    cors_origins: str = "http://localhost:3000,http://localhost:8000"
+    cors_origins: str = "http://localhost:3000,http://localhost:51511,http://localhost:8000"
 
     # OpenTelemetry Configuration
     otel_enabled: bool = True
@@ -85,6 +85,17 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     email_from: str = "noreply@example.com"
+    admin_notification_email: str = "developerhasnainraza@gmail.com"
+
+    # WhatsApp Business API Configuration
+    whatsapp_access_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_business_account_id: str = ""
+    whatsapp_verify_token: str = ""
+    whatsapp_app_secret: str = ""
+    whatsapp_business_name: str = "AI Support Copilot"
+    whatsapp_display_phone: str = ""
+    whatsapp_notification_phone: str = ""
 
     slack_webhook_url: str = ""
     slack_bot_token: str = ""

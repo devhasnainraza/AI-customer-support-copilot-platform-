@@ -4,11 +4,11 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth, getUserRole } from '@/stores/authStore'
 
-type UserRole = 'admin' | 'agent' | 'manager' | 'customer'
+type UserRole = 'admin' | 'agent' | 'manager' | 'customer' | 'suspended'
 
 interface RoleGuardProps {
   children: React.ReactNode
-  allowedRoles: UserRole[]
+  allowedRoles: ('admin' | 'agent' | 'manager' | 'customer')[]
   redirectTo?: string
 }
 
@@ -23,7 +23,14 @@ export function RoleGuard({ children, allowedRoles, redirectTo = '/login' }: Rol
       router.push(redirectTo)
       return
     }
-    if (!allowedRoles.includes(role)) {
+    if (role === 'suspended') {
+      import('@/lib/supabase').then(({ signOut }) => {
+        void signOut()
+      })
+      router.replace('/login?error=account_suspended')
+      return
+    }
+    if (!allowedRoles.includes(role as any)) {
       // Redirect to role-appropriate page
       if (role === 'admin') router.push('/admin')
       else if (role === 'manager') router.push('/manager')
@@ -32,16 +39,17 @@ export function RoleGuard({ children, allowedRoles, redirectTo = '/login' }: Rol
     }
   }, [isLoading, isAuthenticated, role, allowedRoles, redirectTo, router])
 
-  if (isLoading) {
+  if (isLoading || !isAuthenticated || !allowedRoles.includes(role as any)) {
     return (
       <div className="flex h-screen items-center justify-center bg-[#fbfbfa]">
-        <div className="text-sm font-semibold text-slate-500">Checking access...</div>
+        <div className="flex flex-col items-center gap-2">
+          <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin" />
+          <div className="text-xs font-bold text-slate-500">
+            {isLoading ? 'Checking permissions...' : 'Redirecting to your authorized workspace...'}
+          </div>
+        </div>
       </div>
     )
-  }
-
-  if (!isAuthenticated || !allowedRoles.includes(role)) {
-    return null
   }
 
   return <>{children}</>

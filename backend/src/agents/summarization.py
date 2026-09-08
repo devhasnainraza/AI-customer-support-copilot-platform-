@@ -30,148 +30,165 @@ async def summarization_agent(state: AgentState) -> AgentState:
     """
     Summarization Agent: Summarizes the conversation and creates a ticket
     """
+    import asyncio
     try:
         logger.info(f"Summarization Agent processing conversation {state['conversation_id']}")
 
-        # 0. A conversation may only have one ticket (tickets.conversation_id is
-        # UNIQUE). Re-escalation must not attempt a duplicate insert.
         from src.config.supabase import get_service_client
+        from src.services.handoff_service import handoff_manager
+        from src.api.websockets.connection_manager import manager
 
+        # 0. Check if a ticket already exists for this conversation
         supabase = get_service_client()
         existing = (
             supabase.table("tickets")
-            .select("ticket_number")
+            .select("ticket_number, id")
             .eq("conversation_id", str(state['conversation_id']))
             .limit(1)
             .execute()
         )
 
+        ticket_number = None
         if existing.data:
-            existing_number = existing.data[0]["ticket_number"]
+            ticket_number = existing.data[0]["ticket_number"]
             logger.info(
-                f"Ticket {existing_number} already exists for conversation "
+                f"Ticket {ticket_number} already exists for conversation "
                 f"{state['conversation_id']}; skipping creation"
             )
-            state['ai_response'] = _append_escalation_notice(
-                state.get('ai_response'),
-                f"Your existing support ticket {existing_number} has been updated. "
-                f"A member of our support team will follow up with you shortly."
-            )
-            return state
 
-        # 1. Fetch conversation history
-        from src.services.chat_service import ChatService
-        messages = await ChatService.get_conversation_messages(state['conversation_id'])
-        
-        history_text = ""
-        for msg in messages:
-            sender = msg.sender_type.value if hasattr(msg.sender_type, "value") else str(msg.sender_type)
-            history_text += f"{sender}: {msg.content}\n"
-
-        # 2. Call LLM to summarize
-        llm = ChatGroq(
-            api_key=settings.groq_api_key,
-            model_name=settings.groq_model,
-            temperature=0.2
-        )
-
-        # Enrich summary with sentiment and tool data
-        sentiment_info = state.get('sentiment', 'neutral')
-        urgency_info = state.get('sentiment_urgency', 'low')
-        tools_info = state.get('tools_used', [])
-        cues_info = state.get('emotional_cues', [])
-
-        context_extra = f"""
-
-Additional context:
-- Customer sentiment: {sentiment_info}
-- Urgency level: {urgency_info}
-- Emotional cues: {', '.join(cues_info) if cues_info else 'none'}
-- Tools used: {', '.join(tools_info) if tools_info else 'none'}"""
-
-        system_prompt = f"""You are a support supervisor. Summarize the customer chat transcript below into a concise summary of the core issue.
-Keep it under 3-4 sentences. Identify what the customer wants and what has been tried.
-Include sentiment and urgency in the summary."""
-
-        history_text += context_extra
-        
-        response = await llm.ainvoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Transcript:\n{history_text}")
-        ])
-        
-        summary = response.content.strip()
-        logger.info(f"Conversation summary generated: {summary[:100]}...")
-
-        # 3. Classify Priority (Low, Medium, High, Critical) - also factor in sentiment urgency
-        priority = TicketPriority.MEDIUM
-        urgency = state.get('sentiment_urgency', 'low')
-        if urgency == 'critical':
-            priority = TicketPriority.CRITICAL if hasattr(TicketPriority, 'CRITICAL') else TicketPriority.HIGH
-        elif urgency == 'high':
-            priority = TicketPriority.HIGH
-        lower_summary = (summary + " " + state.get('user_message', '')).lower()
-        if any(w in lower_summary for w in ["urgent", "critical", "broken", "down", "error 500", "cannot log in"]):
-            priority = TicketPriority.HIGH
-        if any(w in lower_summary for w in ["billing", "charged", "invoice", "payment", "refund"]):
-            priority = TicketPriority.HIGH
-            
-        # 4. Create Ticket
-        category = "general"
-        if any(w in lower_summary for w in ["billing", "payment", "charge", "refund", "invoice"]):
-            category = "billing"
-        elif any(w in lower_summary for w in ["password", "login", "auth", "account", "profile"]):
-            category = "account"
-        elif any(w in lower_summary for w in ["bug", "crash", "error", "slow", "broken"]):
-            category = "technical"
-
-        ticket = await TicketService.create_ticket(
-            TicketCreate(
-                tenant_id=state['tenant_id'],
-                conversation_id=state['conversation_id'],
-                priority=priority,
-                category=category,
-                created_by=CreationSource.AI_AUTO,
-                ai_summary=summary
-            )
-        )
-        
-        logger.info(f"Ticket auto-created: {ticket.ticket_number}")
-
-        # 5. If user explicitly asked for a human, create a handoff request
-        if state.get('intent') == 'escalation_request':
+        # 1. Generate summary
+        summary = ""
+        user_msg = state.get('user_message', '')
+        if state.get('intent') in ('escalation_request', 'escalation') and len(user_msg) < 150:
+            summary = f"Customer requested human agent assistance: '{user_msg}'"
+        else:
             try:
-                from src.services.handoff_service import handoff_manager
-                handoff_priority = state.get('_handoff_priority', 'medium')
+                from src.services.chat_service import ChatService
+                messages = await ChatService.get_conversation_messages(state['conversation_id'])
+                
+                history_text = ""
+                for msg in (messages or [])[-6:]:
+                    sender = msg.sender_type.value if hasattr(msg.sender_type, "value") else str(msg.sender_type)
+                    history_text += f"{sender}: {msg.content}\n"
+
+                if not history_text.strip():
+                    history_text = f"customer: {user_msg}"
+
+                llm = ChatGroq(
+                    api_key=settings.groq_api_key,
+                    model_name=settings.groq_model,
+                    temperature=0.2
+                )
+
+                system_prompt = "You are a support supervisor. Summarize the customer inquiry into 1-2 concise sentences."
+                resp = await asyncio.wait_for(
+                    llm.ainvoke([
+                        SystemMessage(content=system_prompt),
+                        HumanMessage(content=f"Transcript:\n{history_text}")
+                    ]),
+                    timeout=4.0
+                )
+                summary = resp.content.strip()
+            except Exception as sum_err:
+                logger.warning(f"Summary generation fallback: {sum_err}")
+                summary = f"Customer inquiry: '{user_msg}'"
+
+        # 2. If ticket does not exist, create it
+        if not ticket_number:
+            priority = TicketPriority.MEDIUM
+            urgency = state.get('sentiment_urgency', 'low')
+            if urgency == 'critical':
+                priority = TicketPriority.CRITICAL if hasattr(TicketPriority, 'CRITICAL') else TicketPriority.HIGH
+            elif urgency == 'high':
+                priority = TicketPriority.HIGH
+
+            lower_summary = (summary + " " + user_msg).lower()
+            if any(w in lower_summary for w in ["urgent", "critical", "broken", "down", "error 500", "cannot log in"]):
+                priority = TicketPriority.HIGH
+            if any(w in lower_summary for w in ["billing", "charged", "invoice", "payment", "refund"]):
+                priority = TicketPriority.HIGH
+
+            category = "general"
+            if any(w in lower_summary for w in ["billing", "payment", "charge", "refund", "invoice"]):
+                category = "billing"
+            elif any(w in lower_summary for w in ["password", "login", "auth", "account", "profile"]):
+                category = "account"
+            elif any(w in lower_summary for w in ["bug", "crash", "error", "slow", "broken"]):
+                category = "technical"
+
+            try:
+                ticket = await TicketService.create_ticket(
+                    TicketCreate(
+                        tenant_id=state['tenant_id'],
+                        conversation_id=state['conversation_id'],
+                        priority=priority,
+                        category=category,
+                        created_by=CreationSource.AI_AUTO,
+                        ai_summary=summary
+                    )
+                )
+                ticket_number = ticket.ticket_number
+                logger.info(f"Ticket auto-created: {ticket_number}")
+            except Exception as t_err:
+                logger.error(f"Failed to create ticket: {t_err}")
+                ticket_number = "SUPPORT-QUEUE"
+
+        # 3. Create/update handoff request and broadcast to live agent center
+        if state.get('intent') in ('escalation_request', 'escalation') or state.get('should_escalate'):
+            try:
+                handoff_priority = state.get('handoff_priority', 'medium')
                 context = {
-                    'ticket_number': ticket.ticket_number,
+                    'ticket_number': ticket_number,
                     'sentiment': state.get('sentiment'),
                     'sentiment_urgency': state.get('sentiment_urgency'),
                     'ai_summary': summary,
                     'confidence_score': state.get('confidence_score'),
                 }
-                await handoff_manager.request_handoff(
+                req = await handoff_manager.request_handoff(
                     conversation_id=str(state['conversation_id']),
                     customer_id=str(state['customer_id']),
                     tenant_id=str(state['tenant_id']),
-                    reason=state.get('escalation_reason', 'User requested human agent'),
+                    reason=state.get('escalation_reason', 'User requested human specialist'),
                     priority=handoff_priority,
                     context=context,
                 )
-                logger.info(f"Handoff request created for conversation {state['conversation_id']}")
+                await manager.broadcast_to_agents(
+                    {
+                        "type": "handoff_notification",
+                        "handoff": req.to_dict(),
+                    }
+                )
+                # Also notify customer websocket of handoff waiting status
+                await manager.send_to_conversation(
+                    {
+                        "type": "handoff_notification",
+                        "handoff": req.to_dict(),
+                    },
+                    str(state['conversation_id'])
+                )
+                logger.info(f"Handoff request created and broadcasted for conversation {state['conversation_id']}")
             except Exception as h_err:
                 logger.warning(f"Failed to create handoff request: {h_err}")
 
-        # 6. Update state: keep the Support Agent's answer, append the notice
-        state['ai_response'] = _append_escalation_notice(
-            state.get('ai_response'),
-            f"I've also created a support ticket for you: {ticket.ticket_number}. "
-            f"A member of our support team will follow up with you shortly."
-        )
+        # 4. Set final AI response
+        if state.get('intent') in ('escalation_request', 'escalation'):
+            state['ai_response'] = (
+                f"I have transferred your request to our live human support team (Ticket #{ticket_number}). "
+                f"A support specialist has been alerted in our Escalation Command Center and will join you right away."
+            )
+        else:
+            state['ai_response'] = _append_escalation_notice(
+                state.get('ai_response'),
+                f"I've also created a support ticket for you: {ticket_number}. "
+                f"A member of our support team will follow up with you shortly."
+            )
 
+        state['step_count'] = state.get('step_count', 0) + 1
         return state
 
     except Exception as e:
-        logger.error(f"Summarization Agent failed: {e}")
+        logger.error(f"Summarization Agent failed: {e}", exc_info=True)
         state['error'] = f"Summarization error: {str(e)}"
+        if not state.get('ai_response'):
+            state['ai_response'] = "I have notified our support team and created an escalation for you. A specialist will follow up shortly."
         return state

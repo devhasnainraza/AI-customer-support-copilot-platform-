@@ -249,6 +249,35 @@ async def list_tickets(
     )
 
 
+@router.get("/stats")
+async def get_ticket_stats(current_user: dict = Depends(get_current_user)):
+    """
+    Get ticket statistics count summary grouped by status
+    """
+    tenant_id = UUID(current_user["tenant_id"])
+    role = current_user["role"]
+    supabase = get_service_client()
+    query = supabase.table("tickets").select("status, priority").eq("tenant_id", str(tenant_id))
+    if role == "customer":
+        customer_id = UUID(current_user["user_id"])
+        convs = await ChatService.get_customer_conversations(customer_id, limit=100)
+        conv_ids = [str(c.id) for c in convs]
+        if not conv_ids:
+            return {"total": 0, "open": 0, "in_progress": 0, "resolved": 0, "closed": 0}
+        query = query.in_("conversation_id", conv_ids)
+
+    res = query.execute()
+    data = res.data or []
+    counts = {"total": len(data), "open": 0, "in_progress": 0, "resolved": 0, "closed": 0}
+    for row in data:
+        st = row.get("status", "open")
+        if st in counts:
+            counts[st] += 1
+        else:
+            counts["open"] += 1
+    return counts
+
+
 @router.get("/{ticket_id}", response_model=TicketDetail)
 async def get_ticket(
     ticket_id: UUID,

@@ -24,6 +24,23 @@ async def sentiment_agent(state: AgentState) -> AgentState:
     try:
         logger.info(f"Sentiment Agent processing conversation {state['conversation_id']}")
 
+        # Fast-path for explicit escalation requests
+        if state.get('intent') == 'escalation_request':
+            state['sentiment'] = 'frustrated'
+            state['sentiment_urgency'] = 'high'
+            state['emotional_cues'] = ['requests human support specialist']
+            state['step_count'] = state.get('step_count', 0) + 1
+            logger.info("Fast-path: Sentiment classified for escalation_request")
+            return state
+
+        # Fast-path for greetings
+        if state.get('intent') == 'greeting':
+            state['sentiment'] = 'positive'
+            state['sentiment_urgency'] = 'low'
+            state['emotional_cues'] = ['friendly greeting']
+            state['step_count'] = state.get('step_count', 0) + 1
+            return state
+
         llm = ChatGroq(
             api_key=settings.groq_api_key,
             model_name=settings.groq_model,
@@ -77,8 +94,13 @@ Classification guide:
             HumanMessage(content=f"Customer message: {state['user_message']}\n\n{context}")
         ]
 
-        response = await llm.ainvoke(messages)
-        raw = response.content.strip()
+        import asyncio
+        try:
+            response = await asyncio.wait_for(llm.ainvoke(messages), timeout=4.0)
+            raw = response.content.strip()
+        except asyncio.TimeoutError:
+            logger.warning("Sentiment LLM timed out; defaulting to neutral")
+            raw = '{"sentiment": "neutral", "urgency": "low", "emotional_cues": []}'
 
         # Parse JSON response
         try:
