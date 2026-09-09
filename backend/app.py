@@ -4,7 +4,9 @@ Dual Mode: Interactive Gradio Multi-Agent Chat UI + Full FastAPI Backend API
 """
 import os
 import sys
+import asyncio
 from typing import List
+from uuid import uuid4
 
 # Ensure backend root is on sys.path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,13 +18,10 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 import gradio as gr
+from langchain_core.messages import HumanMessage, AIMessage
+
 from src.api.main import app as fastapi_app
-from src.agents.planner import PlannerAgent
-from src.agents.sentiment import SentimentAgent
-from src.agents.support import SupportAgent
-from src.agents.reflection import ReflectionAgent
-from src.agents.escalation import EscalationAgent
-from src.models.agent import AgentContext
+from src.agents.graph import run_agent_workflow, AgentState
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Gradio Chat Logic using LangGraph Multi-Agent Pipeline
@@ -36,71 +35,100 @@ async def process_chat_message(message: str, history: List[dict]):
         yield history, "Ready for next message", "Neutral", "N/A"
         return
 
-    # Add user message to history
-    updated_history = list(history) + [{"role": "user", "content": message}]
+    # Append user message to conversation history
+    updated_history = list(history or []) + [{"role": "user", "content": message}]
     yield updated_history, "Analyzing Intent...", "Calculating...", "..."
 
     try:
-        # Build context
-        conversation_history = [
-            {"sender": m["role"], "content": m["content"]}
-            for m in updated_history
-        ]
-        context = AgentContext(
-            conversation_id="hf-space-session",
-            customer_id="hf-guest-user",
-            conversation_history=conversation_history,
-            current_message=message
-        )
+        # Build LangChain message history
+        lc_messages = []
+        for m in (history or []):
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if role == "user":
+                lc_messages.append(HumanMessage(content=content))
+            else:
+                lc_messages.append(AIMessage(content=content))
 
-        # 1. Planner Agent
-        planner = PlannerAgent()
-        plan_state = await planner.process(context)
-        intent = plan_state.get("intent", "general_query")
-        intent_status = f"Intent: {intent.upper()}"
+        # Build initial LangGraph AgentState
+        initial_state: AgentState = {
+            'conversation_id': uuid4(),
+            'customer_id': uuid4(),
+            'tenant_id': uuid4(),
+            'language': 'en',
+            'user_message': message,
+            'messages': lc_messages,
+            'intent': None,
+            'requires_retrieval': True,
+            'retrieved_chunks': [],
+            'retrieval_successful': False,
+            'ai_response': None,
+            'confidence_score': 0.0,
+            'should_escalate': False,
+            'escalation_reason': None,
+            'sentiment': None,
+            'sentiment_urgency': None,
+            'emotional_cues': [],
+            'tool_calls': [],
+            'tool_results': [],
+            'tools_used': [],
+            'reflection_passed': True,
+            'reflection_issues': [],
+            'reflection_action': None,
+            'original_response': None,
+            'suggested_followups': [],
+            'handoff_priority': None,
+            'error': None,
+            'step_count': 0
+        }
 
-        # 2. Sentiment Agent
-        sentiment_agent = SentimentAgent()
-        sentiment_state = await sentiment_agent.process(context)
-        sentiment_val = sentiment_state.get("sentiment", "neutral").capitalize()
+        # Run complete multi-agent workflow
+        final_state = await asyncio.wait_for(run_agent_workflow(initial_state), timeout=25.0)
 
-        # Check for immediate escalation
-        if plan_state.get("should_escalate") or "human" in message.lower() or "agent" in message.lower():
-            escalation_agent = EscalationAgent()
-            esc_state = await escalation_agent.process(context)
-            ticket_num = "TICK-LIVE-DEMO"
-            bot_reply = (
+        # Extract telemetry
+        intent = (final_state.get('intent') or 'general_query').upper()
+        sentiment = (final_state.get('sentiment') or 'neutral').capitalize()
+        urgency = final_state.get('sentiment_urgency') or 'Normal'
+        confidence = final_state.get('confidence_score', 0.95)
+        should_escalate = final_state.get('should_escalate', False)
+        escalation_reason = final_state.get('escalation_reason')
+        ai_response = final_state.get('ai_response') or "Thank you for reaching out. How can I assist you further?"
+        followups = final_state.get('suggested_followups') or []
+
+        intent_status = f"{intent} ({'RAG Active' if final_state.get('retrieval_successful') else 'Direct Flow'})"
+        sentiment_status = f"{sentiment} (Urgency: {urgency.capitalize()})"
+        confidence_status = f"{int(confidence * 100)}% Grounded"
+
+        # Format output if escalated
+        if should_escalate or intent == 'ESCALATION_REQUEST':
+            confidence_status = "100% (Escalated)"
+            escalation_badge = (
                 f"🚨 **Live Support Escalation Triggered**\n\n"
-                f"I have transferred your request to our senior human support team. "
-                f"A live support specialist will join shortly.\n\n"
-                f"- **Ticket Number**: `{ticket_num}`\n"
-                f"- **Reason**: {esc_state.get('escalation_reason', 'User requested specialist')}\n"
-                f"- **Priority**: High\n"
-                f"- **Status**: Waiting in queue"
+                f"{ai_response}\n\n"
+                f"- **Ticket Ref**: `TICK-LIVE-DEMO`\n"
+                f"- **Reason**: {escalation_reason or 'Transferred to human specialist'}\n"
+                f"- **Priority**: {urgency.capitalize()}\n"
+                f"- **Specialist Queue**: Active"
             )
-            updated_history.append({"role": "assistant", "content": bot_reply})
-            yield updated_history, intent_status, sentiment_val, "100% (Escalated)"
+            updated_history.append({"role": "assistant", "content": escalation_badge})
+            yield updated_history, intent_status, sentiment_status, confidence_status
             return
 
-        # 3. Grounded Support Agent
-        support_agent = SupportAgent()
-        support_state = await support_agent.process(context)
-        draft_response = support_state.get("response", "Thank you for reaching out. How can I assist you further?")
+        # Append follow-up suggestions if available
+        if followups and isinstance(followups, list):
+            followup_text = "\n\n💡 **Suggested Next Questions:**\n" + "\n".join([f"- {f}" for f in followups[:3]])
+            ai_response += followup_text
 
-        # 4. Reflection & Guardrails Agent
-        reflection_agent = ReflectionAgent()
-        reflection_state = await reflection_agent.process(context)
-        confidence = reflection_state.get("confidence_score", 0.95)
-        conf_str = f"{(confidence * 100):.0f}% Grounded"
-
-        final_response = draft_response
-        updated_history.append({"role": "assistant", "content": final_response})
-        yield updated_history, intent_status, sentiment_val, conf_str
+        updated_history.append({"role": "assistant", "content": ai_response})
+        yield updated_history, intent_status, sentiment_status, confidence_status
 
     except Exception as e:
-        err_msg = f"I am your AI Support Copilot. (Engine Note: {str(e)})"
-        updated_history.append({"role": "assistant", "content": err_msg})
-        yield updated_history, "Fallback Mode", "Neutral", "Degraded"
+        fallback_reply = (
+            f"Hello! I am your AI Support Copilot. I'm currently running in resilient fallback mode.\n\n"
+            f"*(Engine status: {str(e)})*"
+        )
+        updated_history.append({"role": "assistant", "content": fallback_reply})
+        yield updated_history, "FALLBACK", "Neutral", "Degraded"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
