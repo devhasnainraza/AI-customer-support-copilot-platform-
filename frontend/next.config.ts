@@ -15,8 +15,8 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' data: https://fonts.gstatic.com",
       "img-src 'self' data: blob:",
-      // API + WebSocket + Supabase
-      "connect-src 'self' http://localhost:8000 ws://localhost:8000 http://localhost:8001 ws://localhost:8001 http://localhost:8002 ws://localhost:8002 https://*.supabase.co wss://*.supabase.co",
+      // API + WebSocket + Supabase (supports local, Hugging Face Spaces, Render, and Supabase)
+      "connect-src 'self' https://*.hf.space wss://*.hf.space https://*.onrender.com wss://*.onrender.com https://*.supabase.co wss://*.supabase.co http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -24,12 +24,14 @@ const securityHeaders = [
   },
 ];
 
+const API_DESTINATION = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
         source: "/v1/:path*",
-        destination: "http://localhost:8000/v1/:path*",
+        destination: `${API_DESTINATION.replace(/\/$/, '')}/v1/:path*`,
       },
     ];
   },
