@@ -20,6 +20,19 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 import gradio as gr
 from langchain_core.messages import HumanMessage, AIMessage
 
+# ZeroGPU initialization guard (prevents shutdown if space is set to ZeroGPU hardware)
+try:
+    import spaces
+    @spaces.GPU(duration=10)
+    def _zero_gpu_init():
+        return True
+    try:
+        _zero_gpu_init()
+    except Exception:
+        pass
+except ImportError:
+    pass
+
 from src.api.main import app as fastapi_app
 from src.agents.graph import run_agent_workflow, AgentState
 
