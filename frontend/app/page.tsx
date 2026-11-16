@@ -22,6 +22,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'customer' | 'agent' | 'manager' | 'admin'>('customer')
   const [activeStepIndex, setActiveStepIndex] = useState(0)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   // Auto-cycle through the multi-agent pipeline steps for dynamic visual flair
   useEffect(() => {
@@ -29,6 +30,17 @@ export default function Home() {
       setActiveStepIndex((prev) => (prev + 1) % 6)
     }, 3500)
     return () => clearInterval(timer)
+  }, [])
+
+  // Close mobile menu on resize to desktop
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setIsMobileMenuOpen(false)
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -238,36 +250,36 @@ export default function Home() {
       {/* ── TOP AMBIENT GLOW MESH ── */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[480px] ambient-glow-mesh pointer-events-none -z-10 opacity-70" />
 
-      {/* ── FLOATING GLASS NAVIGATION ── */}
-      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-xl px-4 sm:px-8 py-3.5 shadow-xs transition-all">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      {/* ── FULLY RESPONSIVE FLOATING GLASS NAVIGATION ── */}
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 backdrop-blur-xl px-3.5 sm:px-8 py-3 sm:py-3.5 shadow-xs transition-all">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
           
           {/* Brand Logo & Telemetry Status */}
-          <Link href="/" className="flex items-center gap-3 group shrink-0">
+          <Link href="/" className="flex items-center gap-2.5 sm:gap-3 group shrink-0">
             <div className="relative">
-              <Logo variant="icon" height={42} className="group-hover:scale-105 transition-transform" />
-              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+              <Logo variant="icon" height={36} className="sm:h-[42px] group-hover:scale-105 transition-transform" />
+              <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5 sm:h-3 sm:w-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border-2 border-white" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 sm:h-3 sm:w-3 bg-emerald-500 border-2 border-white" />
               </span>
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-display font-black text-lg text-slate-950 tracking-tight block leading-tight">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <span className="font-display font-black text-base sm:text-lg text-slate-950 tracking-tight block leading-tight">
                   Copilot <span className="bg-gradient-to-r from-cyan-600 to-blue-800 bg-clip-text text-transparent">SUPPORT</span>
                 </span>
-                <span className="badge-vip badge-vip-indigo text-[10px] hidden sm:inline-flex">
+                <span className="badge-vip badge-vip-indigo text-[9px] sm:text-[10px] hidden xs:inline-flex">
                   Enterprise
                 </span>
               </div>
-              <span className="text-[11px] text-slate-500 font-semibold tracking-wide flex items-center gap-1.5">
+              <span className="text-[10px] sm:text-[11px] text-slate-500 font-semibold tracking-wide flex items-center gap-1 sm:gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                Operational &bull; 99.98% Uptime
+                <span className="hidden sm:inline">Operational &bull; </span>99.98% Uptime
               </span>
             </div>
           </Link>
 
-          {/* Center Role Navigation Links */}
+          {/* Center Role Navigation Links (Desktop) */}
           <nav className="hidden lg:flex items-center gap-1 bg-slate-100/80 p-1 rounded-2xl border border-slate-200/80 text-xs font-bold text-slate-600">
             <Link
               href="/customer/chat"
@@ -302,58 +314,237 @@ export default function Home() {
             </Link>
           </nav>
 
-          {/* Right User Actions */}
-          <div className="flex items-center gap-2.5">
-            {isAuthenticated ? (
-              <div className="flex items-center gap-2">
-                {(() => {
-                  const target = role === 'admin' ? '/admin' : role === 'manager' ? '/manager' : role === 'agent' ? '/agent' : '/customer/chat'
-                  const label = role === 'admin' ? 'Admin Portal' : role === 'manager' ? 'Manager Portal' : role === 'agent' ? 'Agent Workspace' : 'Open Chat'
-                  return (
-                    <Link
-                      href={target}
-                      className="btn-vip-primary px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
-                    >
-                      <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                      <span>{label}</span>
-                    </Link>
-                  )
-                })()}
-                <button
-                  onClick={() => void logout()}
-                  className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-slate-100 border border-slate-200/80 transition-colors"
-                  title="Sign Out"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Link
-                  href="/login"
-                  className="btn-vip-secondary px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
-                >
-                  Sign In
-                </Link>
-                <Link
-                  href="/customer/chat"
-                  className="btn-vip-primary px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-100 flex items-center gap-1.5"
-                >
-                  <span>Start Chat</span>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                  </svg>
-                </Link>
-              </div>
-            )}
+          {/* Right Actions & Mobile Hamburger Toggle */}
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Desktop Auth Actions */}
+            <div className="hidden sm:flex items-center gap-2">
+              {isAuthenticated ? (
+                <div className="flex items-center gap-2">
+                  {(() => {
+                    const target = role === 'admin' ? '/admin' : role === 'manager' ? '/manager' : role === 'agent' ? '/agent' : '/customer/chat'
+                    const label = role === 'admin' ? 'Admin Portal' : role === 'manager' ? 'Manager Portal' : role === 'agent' ? 'Agent Workspace' : 'Open Chat'
+                    return (
+                      <Link
+                        href={target}
+                        className="btn-vip-primary px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 sm:gap-2"
+                      >
+                        <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                        <span>{label}</span>
+                      </Link>
+                    )
+                  })()}
+                  <button
+                    onClick={() => void logout()}
+                    className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-slate-100 border border-slate-200/80 transition-colors cursor-pointer"
+                    title="Sign Out"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Link
+                    href="/login"
+                    className="btn-vip-secondary px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
+                  >
+                    Sign In
+                  </Link>
+                  <Link
+                    href="/customer/chat"
+                    className="btn-vip-primary px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-100 flex items-center gap-1.5"
+                  >
+                    <span>Start Chat</span>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                  </Link>
+                </div>
+              )}
+            </div>
+
+            {/* Mobile Chat Quick Icon (Small screens) */}
+            <Link
+              href="/customer/chat"
+              className="sm:hidden p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center"
+              aria-label="Start Chat"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </Link>
+
+            {/* Mobile Hamburger / Close Button */}
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="lg:hidden p-2 rounded-xl text-slate-700 hover:text-indigo-600 hover:bg-slate-100 border border-slate-200/90 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              aria-label="Toggle navigation menu"
+              aria-expanded={isMobileMenuOpen}
+            >
+              {isMobileMenuOpen ? (
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
           </div>
 
         </div>
+
+        {/* ── RESPONSIVE MOBILE ACCORDION / SLIDE-DOWN DRAWER ── */}
+        {isMobileMenuOpen && (
+          <div className="lg:hidden mt-3 pt-3 border-t border-slate-200/90 animate-in fade-in slide-in-from-top-2 duration-200 space-y-3">
+            
+            {/* Navigation Portal Links */}
+            <div className="grid grid-cols-1 gap-1.5 font-bold text-xs text-slate-700">
+              <Link
+                href="/customer/chat"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 hover:text-indigo-600 transition-all"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="p-1.5 rounded-lg bg-blue-50 text-blue-600">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                  </span>
+                  <span>Customer Live Chat</span>
+                </div>
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">Public</span>
+              </Link>
+
+              <Link
+                href="/customer/tickets"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 hover:text-indigo-600 transition-all"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                    </svg>
+                  </span>
+                  <span>My Support Tickets</span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono">Tracking</span>
+              </Link>
+
+              <Link
+                href="/agent"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 hover:text-indigo-600 transition-all"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="p-1.5 rounded-lg bg-violet-50 text-violet-600">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  </span>
+                  <span>Agent Queue</span>
+                </div>
+                <span className="px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-700 text-[10px] font-black">WS LIVE</span>
+              </Link>
+
+              <Link
+                href="/manager"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 hover:text-indigo-600 transition-all"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="p-1.5 rounded-lg bg-teal-50 text-teal-600">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                  </span>
+                  <span>Manager Telemetry</span>
+                </div>
+                <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">SLA</span>
+              </Link>
+
+              <Link
+                href="/admin"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 hover:text-indigo-600 transition-all"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="p-1.5 rounded-lg bg-amber-50 text-amber-600">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </span>
+                  <span>Admin Knowledge Engine</span>
+                </div>
+                <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-md">pgvector</span>
+              </Link>
+            </div>
+
+            {/* Mobile Auth / Profile Action Bar */}
+            <div className="pt-2 border-t border-slate-200/80">
+              {isAuthenticated ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between px-1 text-xs text-slate-500 font-medium">
+                    <span>Signed in as:</span>
+                    <span className="font-bold text-slate-900 capitalize font-mono">{role || 'User'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const target = role === 'admin' ? '/admin' : role === 'manager' ? '/manager' : role === 'agent' ? '/agent' : '/customer/chat'
+                      const label = role === 'admin' ? 'Admin Portal' : role === 'manager' ? 'Manager Portal' : role === 'agent' ? 'Agent Workspace' : 'Open Chat'
+                      return (
+                        <Link
+                          href={target}
+                          onClick={() => setIsMobileMenuOpen(false)}
+                          className="btn-vip-primary flex-1 py-2.5 rounded-xl text-xs font-bold text-center flex items-center justify-center gap-2"
+                        >
+                          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                          <span>{label}</span>
+                        </Link>
+                      )
+                    })()}
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false)
+                        void logout()
+                      }}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href="/login"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="btn-vip-secondary py-2.5 rounded-xl text-xs font-bold text-center"
+                  >
+                    Sign In
+                  </Link>
+                  <Link
+                    href="/customer/chat"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="btn-vip-primary py-2.5 rounded-xl text-xs font-bold text-center shadow-md shadow-indigo-100 flex items-center justify-center gap-1.5"
+                  >
+                    <span>Start Chat</span>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                  </Link>
+                </div>
+              )}
+            </div>
+
+          </div>
+        )}
       </header>
 
-      {/* ── MAIN BODY CONTENT ── */}
+      {/* ── MAIN BODY CONTENT (PRESERVED) ── */}
       <main className="flex-1 space-y-16 sm:space-y-24 pb-20">
         
         {/* ── HERO SECTION & INSTANT AI PROMPT ── */}
@@ -677,7 +868,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ── LIVE MULTI-AGENT ORCHESTRATION PIPELINE ── */}
+        {/* ── LIVE MULTI-AGENT ORCHESTRATION PIPELINE (PRESERVED) ── */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="text-center max-w-3xl mx-auto mb-10 space-y-2">
             <span className="badge-vip badge-vip-indigo">LangGraph Agentic Flow</span>
@@ -729,7 +920,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ── BROWSE BY HELP CATEGORY ── */}
+        {/* ── BROWSE BY HELP CATEGORY (PRESERVED) ── */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -814,7 +1005,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ── 2 CORE ENTRY CARDS (CHAT & TICKETS) ── */}
+        {/* ── 2 CORE ENTRY CARDS (CHAT & TICKETS) (PRESERVED) ── */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             
